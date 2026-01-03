@@ -92,6 +92,26 @@ class t_cusp(cusp):
         """returns callable of dx/dt diagonal element of cusp"""
         return lambda t, x : self._par['a'] * pow(x,3) + self._par['b'] * x \
                                                        + self._par['c'](t)
+                                                       
+class linear(tipping_element):
+    def __init__(self, a, c, x_0):
+        """Constructor with additional parameters for cusp"""
+        super().__init__()
+        self._type = 'linear'
+        self._par['a'] = a
+        self._par['c'] = c
+        self._par['x_0'] = x_0
+
+    def dxdt_diag(self):
+        """returns callable of dx/dt diagonal element of cusp"""
+        return lambda t, x : self._par['a'] * (x - self._par['x_0']) + self._par['c'](t) 
+
+    def jac_diag(self):
+        """returns callable jacobian diagonal element of cusp."""
+        return lambda t, x : self._par['a']
+
+    def tip_state(self):
+        return lambda x: x > self._par['x_0']
 
 class hopf(tipping_element):
     """Concrete class for tipping_elements following the dynamics of a

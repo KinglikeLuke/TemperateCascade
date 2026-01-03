@@ -4,6 +4,7 @@ between one year in the simulation and one "real" year depending on the tipping 
 """
 import sys
 sys.path.append('')
+import copy
 
 import numpy as np
 from scipy.integrate import odeint
@@ -12,23 +13,20 @@ from core.tipping_network import tipping_network
 from core.coupling import linear_coupling
 from core.evolve import evolve
 from earth_sys.functions_earth_system_no_enso import global_functions
+from earth_sys.earth_no_enso import EarthParams
 
 
 
 class timing():
 
-    def __init__(self, tau_gis, tau_thc, tau_wais, tau_amaz, tau_nino):
+    def __init__(self, earth_params:EarthParams):
         #Timescales
-        self._gis_realtime = tau_gis
-        self._thc_realtime = tau_thc
-        self._wais_realtime = tau_wais
-        self._nino_realtime = tau_nino
-        self._amaz_realtime = tau_amaz
+        self.earth_params = earth_params
 
 
         #Compute conversion factor
-        self._real_timescale = self._gis_realtime                   					 #value normed to GIS
-        self._timescale = self._gis_realtime/self._amaz_realtime    					 #value normed to GIS
+        self._real_timescale = self.earth_params.gis_time                   					 #value normed to GIS
+        self._timescale = self.earth_params.gis_time/self.earth_params.amaz_time                #value normed to GIS
         self._tip_point_gis = 1.8  # most probable tipping point (see Robinson, 2012)    #value normed to GIS
         self._c_krit = np.sqrt(4 / 27)
         self._GMT_cal = 4.0                                        						 #normed temperature
@@ -43,12 +41,14 @@ class timing():
     Here we insert tipping time scales at a temperature around 4°C above pre-industrial, since time scales are shifting during simulation due to structure of CUSP-catastrophe
     """
     def timescales(self):
-        gis_time = self._gis_realtime/self._amaz_realtime
-        thc_time = self._thc_realtime/self._amaz_realtime
-        wais_time = self._wais_realtime/self._amaz_realtime
-        nino_time = self._nino_realtime/self._amaz_realtime
-        amaz_time = self._amaz_realtime/self._amaz_realtime
-        return gis_time, thc_time, wais_time, nino_time, amaz_time
+        new_params = copy.deepcopy(self.earth_params)
+        new_params.gis_time /= self.earth_params.amaz_time
+        new_params.thc_time /= self.earth_params.amaz_time
+        new_params.wais_time /= self.earth_params.amaz_time
+        new_params.nino_time /= self.earth_params.amaz_time
+        new_params.amaz_time /= self.earth_params.amaz_time
+        new_params.assi_time /= self.earth_params.assi_time
+        return new_params
 
 
     """

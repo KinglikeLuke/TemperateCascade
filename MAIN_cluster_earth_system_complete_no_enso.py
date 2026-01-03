@@ -39,9 +39,14 @@ plus_minus_include = True    # from Kriegler, 2009: Unclear links; if False all 
 ######################################################################
 duration = 50000 #actual real simulation years
 
-params = [0.9183029815394349, 2.3885370105887995, 1.992801071295943, 3.9887964479687965, 4.480642921936935, 0.17987908345005993, 0.8406125344797735, 0.37982673798028066, 0.19622466304037592,
-          0.21995682709593467, 0.2507240489292405, 0.12155858668779652, 0.17717806892447752, 0.15796027793553247, 0.1346368579815631, 0.41619629099617483, 0.38748518389882447, 7757.23023703856,
-          72.19192428443324, 6501.990656966239, 96.92296797423056, 182.25839860429673, 0000]
+params = [0.9183029815394349, 2.3885370105887995, 1.992801071295943, 3.9887964479687965, 4.480642921936935, 3., 
+          0.17987908345005993, 0.8406125344797735, 
+          0.37982673798028066, 0.19622466304037592, 0.21995682709593467, 0.2, 
+          0.2507240489292405, 0.12155858668779652, 0.17717806892447752, 
+          0.15796027793553247, 0.1346368579815631, 
+          0.41619629099617483, 0.38748518389882447, 
+          0.2, 
+          7757.23023703856, 72.19192428443324, 6501.990656966239, 96.92296797423056, 182.25839860429673, 100., 0000]
 
 
 #Names to create the respective directories
@@ -75,35 +80,34 @@ def forcing_function(T_0, mu_0, mu_1, T_lim, R):
 sys_var = params # np.array(sys.argv[2:], dtype=str) #low sample -3, intermediate sample: -2, high sample: -1
 
 
-#Tipping ranges from distribution
-limits_gis, limits_thc, limits_wais, limits_amaz, limits_nino = float(sys_var[0]), float(sys_var[1]), float(sys_var[2]), float(sys_var[3]), float(sys_var[4])
-
-#Probability fractions
-# TO GIS
-pf_wais_to_gis, pf_thc_to_gis = float(sys_var[5]), float(sys_var[6])
-# TO THC
-pf_gis_to_thc, pf_nino_to_thc, pf_wais_to_thc = float(sys_var[7]), float(sys_var[8]), float(sys_var[9])
-# TO WAIS
-pf_nino_to_wais, pf_thc_to_wais, pf_gis_to_wais = float(sys_var[10]), float(sys_var[11]), float(sys_var[12])
-# TO NINO
-pf_thc_to_nino, pf_amaz_to_nino = float(sys_var[13]), float(sys_var[14])
-# TO AMAZ
-pf_nino_to_amaz, pf_thc_to_amaz = float(sys_var[15]), float(sys_var[16])
-
-#tipping time scales
-tau_gis, tau_thc, tau_wais, tau_nino, tau_amaz = float(sys_var[17]), float(sys_var[18]), float(sys_var[19]), float(sys_var[20]), float(sys_var[21])
-
-
+# Tipping ranges from distribution
+keys = [
+    'limits_gis','limits_thc','limits_wais','limits_amaz','limits_nino', 'limits_assi',
+    'pf_wais_to_gis','pf_thc_to_gis',
+    'pf_gis_to_thc','pf_nino_to_thc','pf_wais_to_thc', 'pf_assi_to_thc',
+    'pf_nino_to_wais','pf_thc_to_wais','pf_gis_to_wais',
+    'pf_thc_to_nino','pf_amaz_to_nino',
+    'pf_nino_to_amaz', 'pf_thc_to_amaz',
+    'pf_thc_to_assi',
+    'gis_time','thc_time','wais_time','nino_time','amaz_time', 'assi_time'
+]
+#directories for the Monte Carlo simulation
+mc_dir = int(sys_var[-1])
+values = list(map(float, sys_var[:-1])) # -1 is the mc_dir
+params_dict = dict(zip(keys, values))
+earth_params_raw = EarthParams(**params_dict)
 #Time scale
 if time_scale == True:
     print("compute calibration timescale")
     #function call for absolute timing and time conversion
-    time_props = timing(tau_gis, tau_thc, tau_wais, tau_amaz, tau_nino)
-    gis_time, thc_time, wais_time, nino_time, amaz_time = time_props.timescales()
+    time_props = timing(earth_params_raw)
+    earth_params = time_props.timescales()
     conv_fac_gis = time_props.conversion()
 else:
     #no time scales included
-    gis_time = thc_time = wais_time = nino_time = amaz_time = 1.0
+    earth_params = earth_params_raw
+    earth_params.gis_time, earth_params.amaz_time, earth_params.assi_time, earth_params.nino_time, earth_params.thc_time, \
+        earth_params.wais_time = 1.0, 1.0, 1.0, 1.0, 1.0, 1.0
     conv_fac_gis = 1.0
 
 #include uncertain "+-" links:
@@ -121,16 +125,6 @@ else:
     plus_minus_links = [np.array([1., 1., 1.])]
 
 
-#directories for the Monte Carlo simulation
-mc_dir = int(sys_var[-1])
-
-################################# MAIN #################################
-# Create EarthParams dataclass instance
-earth_params = EarthParams(gis_time, thc_time, wais_time, nino_time, amaz_time,
-                           limits_gis, limits_thc, limits_wais, limits_nino, limits_amaz,
-                           pf_wais_to_gis, pf_thc_to_gis, pf_gis_to_thc, pf_nino_to_thc,
-                           pf_wais_to_thc, pf_gis_to_wais, pf_thc_to_wais, pf_nino_to_wais,
-                           pf_thc_to_nino, pf_amaz_to_nino, pf_nino_to_amaz, pf_thc_to_amaz)
 
 ################################# MAIN LOOP #################################
 def main():
@@ -191,7 +185,7 @@ def main():
                 forcing = lambda t: forcing_function(T_0, mu_0, mu_1, T_lim, R)(t*conv_fac_gis)
                 net = earth_network(earth_params, forcing, strength, kk[0], kk[1], kk[2])
                 # initialize state
-                initial_state = [-1, -1, -1, -1] #initial state
+                initial_state = [-1, -1, -1, -1, -1, -1] #initial state
                 ev = evolve(net, initial_state)
                 # plotter.network(net)
 
@@ -202,7 +196,7 @@ def main():
                 t_end = duration/conv_fac_gis #simulation length in "real" years
                 t_span = np.arange(0, t_end, timestep)
                 sol = odeint( net.f , initial_state, t_span, Dfun=net.jac )
-                ev._times = list(t_span[::10])
+                ev._times = list(t_span[::10]*conv_fac_gis)
                 ev._states = list(sol[::10])
 
 
@@ -212,13 +206,16 @@ def main():
                             ev.get_timeseries()[1][:, 1],
                             ev.get_timeseries()[1][:, 2],
                             ev.get_timeseries()[1][:, 3],
+                            ev.get_timeseries()[1][:, 4],
+                            ev.get_timeseries()[1][:, 5],
                             [net.get_number_tipped(timeseries) for timeseries in ev.get_timeseries()[1]],
                             [[net.get_tip_states(timeseries)[0]].count(True) for timeseries in ev.get_timeseries()[1]],
                             [[net.get_tip_states(timeseries)[1]].count(True) for timeseries in ev.get_timeseries()[1]],
                             [[net.get_tip_states(timeseries)[2]].count(True) for timeseries in ev.get_timeseries()[1]],
                             [[net.get_tip_states(timeseries)[3]].count(True) for timeseries in ev.get_timeseries()[1]],
+                            [[net.get_tip_states(timeseries)[4]].count(True) for timeseries in ev.get_timeseries()[1]],
+                            [[net.get_tip_states(timeseries)[5]].count(True) for timeseries in ev.get_timeseries()[1]],
                             ]
-
 
 
             #necessary for break condition
@@ -232,6 +229,8 @@ def main():
                 state_thc = data[2]
                 state_wais = data[3]
                 state_amaz = data[4]
+                state_nino = data[5]
+                state_assi = data[6]
 
                 #plotting structure
                 fig = plt.figure()
@@ -242,6 +241,7 @@ def main():
                 plt.plot(time, state_thc, label="THC", color='b')
                 plt.plot(time, state_wais, label="WAIS", color='k')
                 plt.plot(time, state_amaz, label="AMAZ", color='g')
+                plt.plot(time, state_nino, label="NINO", color='y')
                 plt.xlabel("Time [yr]")
                 plt.ylabel("system feature f [a.u.]")
                 plt.legend(loc='best')  # , ncol=5)
