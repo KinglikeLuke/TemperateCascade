@@ -54,7 +54,35 @@ class linear_coupling(coupling):
 
     def bif_impact(self):
         return lambda t, x_from , x_to : self._strength * (x_from - self._x_0)
-		
+    
+
+class cusp_derivative_coupling(coupling):
+    """Class for linear coupling to the derivative of a cusp element
+    The coupling consists of a factor (strength) and a coupling element.
+    """
+
+    def __init__(self, strength, params, x_0):
+        """Constructor"""
+        coupling.__init__(self)
+        self._strength = strength
+        self._par = params
+        self.x_0 = x_0
+        
+    def dxdt_cpl(self):
+        """Returns callable for the coupling term of dxdt."""
+        return lambda t, x_from , x_to : self._strength * (self._par['a'] * pow(x_from,3) + self._par['b'] * x_from \
+                                                       + self._par['c'](t) - self.x_0)
+    
+    def jac_cpl(self):
+        """Returns callable for the jacobian coupling matrix element."""
+        return lambda t, x_from , x_to : self._strength * (3 * self._par['a'] * pow(x_from,2) + self._par['b'])
+    
+    def jac_diag(self):
+        return lambda t, x_from , x_to : 0
+
+    def bif_impact(self):
+        return lambda t, x_from , x_to : self._strength * (self._par['a'] * pow(x_from,3) + self._par['b'] * x_from \
+                                                       + self._par['c'](t) - self.x_0)
 
 
 class cusp_to_hopf(coupling):

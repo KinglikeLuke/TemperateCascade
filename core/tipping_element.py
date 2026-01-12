@@ -111,7 +111,7 @@ class linear(tipping_element):
         return lambda t, x : self._par['a']
 
     def tip_state(self):
-        return lambda x: x > self._par['x_0']
+        return lambda x: x > 0 # ehhhhhhhhh
 
 class hopf(tipping_element):
     """Concrete class for tipping_elements following the dynamics of a

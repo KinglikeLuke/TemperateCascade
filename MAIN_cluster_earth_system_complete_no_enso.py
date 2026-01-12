@@ -19,6 +19,7 @@ from PyPDF2 import PdfMerger
 from netCDF4 import Dataset
 import cProfile
 from scipy.integrate import odeint
+from tqdm import tqdm
 
 # private imports from sys.path
 from core.evolve import evolve
@@ -76,39 +77,23 @@ def forcing_function(T_0, mu_0, mu_1, T_lim, R):
     f = lambda t: (T_0 + y*t - (1 - np.exp(-(mu_0+mu_1*t)*t))*(y*t - (T_lim - T_0)))
     return f
 
-########################Declaration of variables from passed values#######################
-sys_var = params # np.array(sys.argv[2:], dtype=str) #low sample -3, intermediate sample: -2, high sample: -1
-
-
 # Tipping ranges from distribution
 keys = [
     'limits_gis','limits_thc','limits_wais','limits_amaz','limits_nino', 'limits_assi',
     'pf_wais_to_gis','pf_thc_to_gis',
     'pf_gis_to_thc','pf_nino_to_thc','pf_wais_to_thc', 'pf_assi_to_thc',
     'pf_nino_to_wais','pf_thc_to_wais','pf_gis_to_wais',
-    'pf_thc_to_nino','pf_amaz_to_nino',
+    'pf_thc_to_nino',
     'pf_nino_to_amaz', 'pf_thc_to_amaz',
     'pf_thc_to_assi',
     'gis_time','thc_time','wais_time','nino_time','amaz_time', 'assi_time'
 ]
-#directories for the Monte Carlo simulation
-mc_dir = int(sys_var[-1])
-values = list(map(float, sys_var[:-1])) # -1 is the mc_dir
-params_dict = dict(zip(keys, values))
-earth_params_raw = EarthParams(**params_dict)
-#Time scale
-if time_scale == True:
-    print("compute calibration timescale")
-    #function call for absolute timing and time conversion
-    time_props = timing(earth_params_raw)
-    earth_params = time_props.timescales()
-    conv_fac_gis = time_props.conversion()
-else:
-    #no time scales included
-    earth_params = earth_params_raw
-    earth_params.gis_time, earth_params.amaz_time, earth_params.assi_time, earth_params.nino_time, earth_params.thc_time, \
-        earth_params.wais_time = 1.0, 1.0, 1.0, 1.0, 1.0, 1.0
-    conv_fac_gis = 1.0
+########################Declaration of variables from passed values#######################
+sys_var = params # np.array(sys.argv[2:], dtype=str) #low sample -3, intermediate sample: -2, high sample: -1
+input_file = np.loadtxt(r"D:\Dokumente\Uni\PhD application\Climate\figshare_overshoots_paper\start_ensemble\latin_prob.txt",
+                        delimiter=" ")
+
+
 
 #include uncertain "+-" links:
 if plus_minus_include == False:
@@ -128,6 +113,7 @@ else:
 
 ################################# MAIN LOOP #################################
 def main():
+    final_results = {}
     for kk in plus_minus_links:
         print("Wais to Thc:{}".format(kk[0]))
         print("Amaz to Nino:{}".format(kk[1]))
@@ -147,107 +133,140 @@ def main():
         except:
             os.mkdir("{}/{}_feedbacks/network_{}_{}_{}".format(long_save_name, namefile, kk[0], kk[1], kk[2]))
 
-        try:
-            os.stat("{}/{}_feedbacks/network_{}_{}_{}/{}".format(long_save_name, namefile, kk[0], kk[1], kk[2], str(mc_dir).zfill(4) ))
-        except:
-            os.mkdir("{}/{}_feedbacks/network_{}_{}_{}/{}".format(long_save_name, namefile, kk[0], kk[1], kk[2], str(mc_dir).zfill(4) ))
+        # try:
+        #     os.stat("{}/{}_feedbacks/network_{}_{}_{}/{}".format(long_save_name, namefile, kk[0], kk[1], kk[2], str(mc_dir).zfill(4) ))
+        # except:
+        #     os.mkdir("{}/{}_feedbacks/network_{}_{}_{}/{}".format(long_save_name, namefile, kk[0], kk[1], kk[2], str(mc_dir).zfill(4) ))
 
         #save starting conditions
-        np.savetxt("{}/{}_feedbacks/network_{}_{}_{}/{}/empirical_values.txt".format(long_save_name, namefile, kk[0], kk[1], kk[2], str(mc_dir).zfill(4)), sys_var, delimiter=" ", fmt="%s")
+        # np.savetxt("{}/{}_feedbacks/network_{}_{}_{}/{}/empirical_values.txt".format(long_save_name, namefile, kk[0], kk[1], kk[2], str(mc_dir).zfill(4)), sys_var, delimiter=" ", fmt="%s")
 
-        for strength in coupling_strength:
-            print("Coupling strength: {}".format(strength))
-            for i in temperature_trajs[1:2]:
-                T_0 = 1.0
-                T_peak_det = i[0]
-                T_lim = i[1]
-                t_conv_det = i[2]
-                R = i[3]
-                mu_0 = i[4]
-                mu_1 = i[5]
-
-                print("T_lim: {}°C".format(T_lim))
-                print("T_peak: {}°C".format(T_peak_det))
-                print("t_conv: {}yrs".format(t_conv_det))
-
-
+        for i in temperature_trajs[1:2]:
+            T_0 = 1.0
+            T_peak_det = i[0]
+            T_lim = i[1]
+            t_conv_det = i[2]
+            R = i[3]
+            mu_0 = i[4]
+            mu_1 = i[5]
+            key = f"T_peak:{T_peak_det},T_lim:{T_lim},t_conv:{t_conv_det}"
+            print("T_lim: {}°C".format(T_lim))
+            print("T_peak: {}°C".format(T_peak_det))
+            print("t_conv: {}yrs".format(t_conv_det))
+            
+            lh_output = []
+            
+            for strength in coupling_strength:
+                print("Coupling strength: {}".format(strength))
                 output = []
-                path = "{}/{}_feedbacks/network_{}_{}_{}/{}/feedbacks_Tlim{}_Tpeak{}_tconv{}_{:.2f}.txt".format(long_save_name, 
-                    namefile, kk[0], kk[1], kk[2], str(mc_dir).zfill(4), T_lim, T_peak_det, t_conv_det, strength)
-                if os.path.isfile(path) == True:
-                    abs_path = os.path.abspath(path)
-                    print(abs_path)
-                    print("File already computed")
-                    #break
-                #For feedback computations
 
-                # get back the network of the Earth system
-                forcing = lambda t: forcing_function(T_0, mu_0, mu_1, T_lim, R)(t*conv_fac_gis)
-                net = earth_network(earth_params, forcing, strength, kk[0], kk[1], kk[2])
-                # initialize state
-                initial_state = [-1, -1, -1, -1, -1, -1] #initial state
-                ev = evolve(net, initial_state)
-                # plotter.network(net)
+                for sys_var in tqdm(input_file):
+                    values = list(map(float, sys_var)) # -1 is the mc_dir
+                    params_dict = dict(zip(keys, values))
+                    earth_params_raw = EarthParams(**params_dict)
+                    # Time scale
+                    if time_scale == True:
+                        # print("compute calibration timescale")
+                        # function call for absolute timing and time conversion
+                        time_props = timing(earth_params_raw)
+                        earth_params = time_props.timescales()
+                        conv_fac_gis = time_props.conversion()
+                    else:
+                        #no time scales included
+                        earth_params = earth_params_raw
+                        earth_params.gis_time, earth_params.amaz_time, earth_params.assi_time, earth_params.nino_time, earth_params.thc_time, \
+                            earth_params.wais_time = 1.0, 1.0, 1.0, 1.0, 1.0, 1.0
+                        conv_fac_gis = 1.0
+                    
+                    
+                    path = "{}/{}_feedbacks/network_{}_{}_{}/feedbacks_Tlim{}_Tpeak{}_tconv{}_{:.2f}".format(long_save_name, 
+                        namefile, kk[0], kk[1], kk[2], T_lim, T_peak_det, t_conv_det, strength)
+                    if os.path.isfile(path) == True:
+                        abs_path = os.path.abspath(path)
+                        print(abs_path)
+                        print("File already computed")
+                        #break
+                    #For feedback computations
 
-                # Timestep to integration; it is also possible to run integration until equilibrium
-                timestep = 0.1
+                    # get back the network of the Earth system
+                    forcing = lambda t: forcing_function(T_0, mu_0, mu_1, T_lim, R)(t*conv_fac_gis)
+                    net = earth_network(earth_params, forcing, strength, kk[0], kk[1], kk[2])
+                    # initialize state
+                    initial_state = [-1, -1, -1, -1, -1, -1] #initial state
+                    ev = evolve(net, initial_state)
+                    # plotter.network(net)
 
-                #t_end given in years; also possible to use equilibrate method
-                t_end = duration/conv_fac_gis #simulation length in "real" years
-                t_span = np.arange(0, t_end, timestep)
-                sol = odeint( net.f , initial_state, t_span, Dfun=net.jac )
-                ev._times = list(t_span[::10]*conv_fac_gis)
-                ev._states = list(sol[::10])
+                    # How many points are to be calculated. odeint's precision is mostly independent of this, taking adaptive steps
+                    n_steps = 1000
 
-
-                #saving structure
-                output = [ev.get_timeseries()[0],
-                            ev.get_timeseries()[1][:, 0],
-                            ev.get_timeseries()[1][:, 1],
-                            ev.get_timeseries()[1][:, 2],
-                            ev.get_timeseries()[1][:, 3],
-                            ev.get_timeseries()[1][:, 4],
-                            ev.get_timeseries()[1][:, 5],
-                            [net.get_number_tipped(timeseries) for timeseries in ev.get_timeseries()[1]],
-                            [[net.get_tip_states(timeseries)[0]].count(True) for timeseries in ev.get_timeseries()[1]],
-                            [[net.get_tip_states(timeseries)[1]].count(True) for timeseries in ev.get_timeseries()[1]],
-                            [[net.get_tip_states(timeseries)[2]].count(True) for timeseries in ev.get_timeseries()[1]],
-                            [[net.get_tip_states(timeseries)[3]].count(True) for timeseries in ev.get_timeseries()[1]],
-                            [[net.get_tip_states(timeseries)[4]].count(True) for timeseries in ev.get_timeseries()[1]],
-                            [[net.get_tip_states(timeseries)[5]].count(True) for timeseries in ev.get_timeseries()[1]],
-                            ]
+                    #t_end given in years; also possible to use equilibrate method
+                    t_end = duration/conv_fac_gis #simulation length in "real" years
+                    t_span = np.linspace(0, t_end, n_steps)
+                    sol = odeint( net.f , initial_state, t_span, Dfun=net.jac )
+                    ev._times = list(t_span*conv_fac_gis)
+                    ev._states = list(sol)
 
 
-            #necessary for break condition
-            if len(output):
-                #saving structure
+                    #saving structure
+                    output.append([ev.get_timeseries()[0],
+                                ev.get_timeseries()[1][:, 0],
+                                ev.get_timeseries()[1][:, 1],
+                                ev.get_timeseries()[1][:, 2],
+                                ev.get_timeseries()[1][:, 3],
+                                ev.get_timeseries()[1][:, 4],
+                                ev.get_timeseries()[1][:, 5],
+                                [net.get_number_tipped(timeseries) for timeseries in ev.get_timeseries()[1]],
+                                [[net.get_tip_states(timeseries)[0]].count(True) for timeseries in ev.get_timeseries()[1]],
+                                [[net.get_tip_states(timeseries)[1]].count(True) for timeseries in ev.get_timeseries()[1]],
+                                [[net.get_tip_states(timeseries)[2]].count(True) for timeseries in ev.get_timeseries()[1]],
+                                [[net.get_tip_states(timeseries)[3]].count(True) for timeseries in ev.get_timeseries()[1]],
+                                [[net.get_tip_states(timeseries)[4]].count(True) for timeseries in ev.get_timeseries()[1]],
+                                [[net.get_tip_states(timeseries)[5]].count(True) for timeseries in ev.get_timeseries()[1]],
+                    ])
+                    
                 data = np.array(output)
-                np.savetxt("{}/{}_feedbacks/network_{}_{}_{}/{}/feedbacks_Tlim{}_Tpeak{}_tconv{}_{:.2f}.txt".format(long_save_name, 
-                    namefile, kk[0], kk[1], kk[2], str(mc_dir).zfill(4), T_lim, T_peak_det, t_conv_det, strength), data[:,-1])
-                time = data[0]
-                state_gis = data[1]
-                state_thc = data[2]
-                state_wais = data[3]
-                state_amaz = data[4]
-                state_nino = data[5]
-                state_assi = data[6]
+                ensemble_avg = np.mean(data, axis=0)
+                lh_output.append(ensemble_avg)
 
+                
+            #necessary for break condition
+            if len(lh_output):
+                #saving structure
+                data = np.array(lh_output)
+                np.savetxt(f"{path}.txt", data[:,6])
+                no_int = data[0]
+                int_avg = np.mean(data[1:], axis=0)
+                int_std = np.std(data[1:], ddof=1, axis=0)
+                t_grid = int_avg[0] # arbitrary whether no_int or int_avg
+                diff_gis = int_avg[1] - no_int[1]
+                diff_thc = int_avg[2] - no_int[2]
+                diff_wais = int_avg[3] - no_int[3]
+                diff_amaz = int_avg[4] - no_int[4]
+                diff_nino = int_avg[5] - no_int[5]
+                diff_assi = int_avg[6] - no_int[6]
+                int_n_tipped = int_avg[7]
+                no_int_n_tipped = no_int[7]
+                final_results[key] = int_n_tipped - no_int_n_tipped
                 #plotting structure
                 fig = plt.figure()
                 plt.grid(True)
-                plt.title("Coupling strength: {}\n  Wais to Thc:{}  Amaz to Nino:{} Thc to Amaz:{} \n Tlim={}°C Tpeak={}°C tconv={}yr".format(
-                    np.round(strength, 2), kk[0], kk[1], kk[2], T_lim, T_peak_det, t_conv_det))
-                plt.plot(time, state_gis, label="GIS", color='c')
-                plt.plot(time, state_thc, label="THC", color='b')
-                plt.plot(time, state_wais, label="WAIS", color='k')
-                plt.plot(time, state_amaz, label="AMAZ", color='g')
-                plt.plot(time, state_nino, label="NINO", color='y')
+                # plt.title("Coupling strength: {}\n  Wais to Thc:{}  Amaz to Nino:{} Thc to Amaz:{} \n Tlim={}°C Tpeak={}°C tconv={}yr".format(
+                #     np.round(strength, 2), kk[0], kk[1], kk[2], T_lim, T_peak_det, t_conv_det))
+                # plt.plot(time, state_gis, label="GIS", color='c')
+                # plt.plot(time, state_thc, label="THC", color='b')
+                # plt.plot(time, state_wais, label="WAIS", color='k')
+                # plt.plot(time, state_amaz, label="AMAZ", color='g')
+                # plt.plot(time, state_nino, label="NINO", color='y')
+                for i, data_strength in enumerate(data[1:]):
+                    plt.plot(t_grid, data_strength[7], label=f"Interactions: 0.{i+1}")
+                plt.plot(t_grid, no_int_n_tipped, label="No interactions", color='y')
+                plt.title(f"Temperature properties: {key}")
                 plt.xlabel("Time [yr]")
-                plt.ylabel("system feature f [a.u.]")
+                plt.ylabel("Tipped elements")
                 plt.legend(loc='best')  # , ncol=5)
                 plt.tight_layout()
-                plt.savefig("{}/{}_feedbacks/network_{}_{}_{}/{}/feedbacks_Tlim{}_Tpeak{}_tconv{}_{:.2f}.pdf".format(long_save_name, namefile, 
-                    kk[0], kk[1], kk[2], str(mc_dir).zfill(4), T_lim, T_peak_det, t_conv_det, strength))
+                plt.savefig("{}/{}_feedbacks/network_{}_{}_{}/feedbacks_Tlim{}_Tpeak{}_tconv{}.pdf".format(long_save_name, namefile, 
+                    kk[0], kk[1], kk[2], T_lim, T_peak_det, t_conv_det))
                 #plt.show()
                 plt.clf()
                 plt.close()
@@ -255,7 +274,7 @@ def main():
 
 
         current_dir = os.getcwd()
-        os.chdir("{}/{}_feedbacks/network_{}_{}_{}/{}/".format(long_save_name, namefile, kk[0], kk[1], kk[2], str(mc_dir).zfill(4)))
+        os.chdir("{}/{}_feedbacks/network_{}_{}_{}/".format(long_save_name, namefile, kk[0], kk[1], kk[2]))
         pdfs = np.array(np.sort(glob.glob("feedbacks_*.pdf"), axis=0))
         if len(pdfs) != 0.:
             merger = PdfMerger()
@@ -269,8 +288,7 @@ def main():
         os.chdir(current_dir)
 
     print("Finish")
-    
-cProfile.run("main()", "main.prof")
+main()
 # Good lord
 # The original Code steps in 0.1 (absolute? idk) year steps through the solver (because the stepsize is far greater than the calibrated(?) t_end)
 # However, it takes its Temperature curve as if it made 1 year steps (every step a new year)
