@@ -10,6 +10,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import seaborn as sns
 sns.set(font_scale=1.)
 import itertools
@@ -18,7 +19,7 @@ import glob
 from PyPDF2 import PdfMerger
 from netCDF4 import Dataset
 import cProfile
-from scipy.integrate import odeint
+from scipy.integrate import odeint, quad
 from tqdm import tqdm
 
 # private imports from sys.path
@@ -28,9 +29,6 @@ from core.evolve import evolve
 from earth_sys.timing_no_enso import timing
 from earth_sys.functions_earth_system_no_enso import global_functions
 from earth_sys.earth_no_enso import EarthParams, earth_network
-
-#for cluster computations
-os.chdir("../")
 
 #measure time
 #start = time.time()
@@ -58,7 +56,7 @@ long_save_name = "results"
 #drive coupling strength
 coupling_strength = np.linspace(0.0, 1.0, 11, endpoint=True)
 #temperature input (forced with generated overshoot inputs)
-temperature_trajs = np.loadtxt(r"D:\Dokumente\Uni\PhD application\Climate\figshare_overshoots_paper\temp_input\Tpeak_tconv_values\temp_input_values.txt", comments=['#']) #T_peak T_lim t_conv R mu_0 mu_1
+temperature_trajs = np.loadtxt(r"temp_input\Tpeak_tconv_values\temp_input_values.txt", comments=['#']) #T_peak T_lim t_conv R mu_0 mu_1
 
 def forcing_function(T_0, mu_0, mu_1, T_lim, R):
     """Returns forcing functions (here just a parametric temperature curve)
@@ -90,7 +88,7 @@ keys = [
 ]
 ########################Declaration of variables from passed values#######################
 sys_var = params # np.array(sys.argv[2:], dtype=str) #low sample -3, intermediate sample: -2, high sample: -1
-input_file = np.loadtxt(r"D:\Dokumente\Uni\PhD application\Climate\figshare_overshoots_paper\start_ensemble\latin_prob.txt",
+input_file = np.loadtxt(r"start_ensemble\latin_prob.txt",
                         delimiter=" ")
 
 
@@ -109,7 +107,25 @@ if plus_minus_include == False:
 else:
     plus_minus_links = [np.array([1., 1., 1.])]
 
+def set_colormap(ax, data_length):
+    """Sets the colormap for a new observation to the new colormap in the list
+    copied from Plasway code
 
+    Args:
+        ax (_type_): plot area that uses the new colormap rule
+        index (_type_): index of the observation that gets the new colormap
+    """
+    index = 0
+    # Reset color-cycling to fresh scale
+    gradient = np.linspace(0.01,1,data_length)
+    ax.set_prop_cycle(plt.cycler("color", plt.cm.magma(gradient)))
+    ax_colormap = inset_axes(ax, width="30%", height="2%", loc=("lower center"), borderpad=1.6+index*1.1)   # Inset that shows the cmaps for the cycle data. Must be located in a center coordinate so that the border hack works
+    ax_colormap.imshow(np.vstack((gradient, gradient)), aspect="auto", cmap=plt.cm.magma, extent=[0,1,0,1])    
+    ax_colormap.text(0.5, 1, "Interaction strength", va='bottom', ha='center', fontsize=10, transform=ax_colormap.transAxes)
+    if index == 0:
+        ax_colormap.axes.get_yaxis().set_visible(False) # only the lowest bar gets the bottom axis
+        ax_colormap.grid(False)
+    else: ax_colormap.set_axis_off()  
 
 ################################# MAIN LOOP #################################
 def main():
@@ -154,13 +170,16 @@ def main():
             print("T_peak: {}°C".format(T_peak_det))
             print("t_conv: {}yrs".format(t_conv_det))
             
-            lh_output = []
+            n_steps = 500
+            avg_output = []
+            std_output = []
             
             for strength in coupling_strength:
                 print("Coupling strength: {}".format(strength))
-                output = []
+                # How many points are to be calculated. odeint's precision is mostly independent of this, taking adaptive steps
+                output = np.zeros((input_file.shape[0], 8, n_steps))
 
-                for sys_var in tqdm(input_file):
+                for i, sys_var in enumerate(tqdm(input_file)):
                     values = list(map(float, sys_var)) # -1 is the mc_dir
                     params_dict = dict(zip(keys, values))
                     earth_params_raw = EarthParams(**params_dict)
@@ -188,84 +207,54 @@ def main():
                         #break
                     #For feedback computations
 
-                    # get back the network of the Earth system
+                    # scale the tempearture properly
                     forcing = lambda t: forcing_function(T_0, mu_0, mu_1, T_lim, R)(t*conv_fac_gis)
                     net = earth_network(earth_params, forcing, strength, kk[0], kk[1], kk[2])
                     # initialize state
                     initial_state = [-1, -1, -1, -1, -1, -1] #initial state
-                    ev = evolve(net, initial_state)
                     # plotter.network(net)
 
-                    # How many points are to be calculated. odeint's precision is mostly independent of this, taking adaptive steps
-                    n_steps = 1000
-
                     #t_end given in years; also possible to use equilibrate method
-                    t_end = duration/conv_fac_gis #simulation length in "real" years
+                    t_end = duration/conv_fac_gis # simulation length in "real" years
                     t_span = np.linspace(0, t_end, n_steps)
                     sol = odeint( net.f , initial_state, t_span, Dfun=net.jac )
-                    ev._times = list(t_span*conv_fac_gis)
-                    ev._states = list(sol)
-
-
+                    total_tipped = np.array([net.get_number_tipped(timeseries) for timeseries in sol])
                     #saving structure
-                    output.append([ev.get_timeseries()[0],
-                                ev.get_timeseries()[1][:, 0],
-                                ev.get_timeseries()[1][:, 1],
-                                ev.get_timeseries()[1][:, 2],
-                                ev.get_timeseries()[1][:, 3],
-                                ev.get_timeseries()[1][:, 4],
-                                ev.get_timeseries()[1][:, 5],
-                                [net.get_number_tipped(timeseries) for timeseries in ev.get_timeseries()[1]],
-                                [[net.get_tip_states(timeseries)[0]].count(True) for timeseries in ev.get_timeseries()[1]],
-                                [[net.get_tip_states(timeseries)[1]].count(True) for timeseries in ev.get_timeseries()[1]],
-                                [[net.get_tip_states(timeseries)[2]].count(True) for timeseries in ev.get_timeseries()[1]],
-                                [[net.get_tip_states(timeseries)[3]].count(True) for timeseries in ev.get_timeseries()[1]],
-                                [[net.get_tip_states(timeseries)[4]].count(True) for timeseries in ev.get_timeseries()[1]],
-                                [[net.get_tip_states(timeseries)[5]].count(True) for timeseries in ev.get_timeseries()[1]],
-                    ])
-                    
-                data = np.array(output)
-                ensemble_avg = np.mean(data, axis=0)
-                lh_output.append(ensemble_avg)
+                    output[i] = np.concatenate((conv_fac_gis*t_span[:,np.newaxis], sol, total_tipped[:,np.newaxis]), axis=1).T
+
+                
+                ensemble_avg = np.mean(output, axis=0)
+                ensemble_std = np.std(output, axis=0, ddof=1)
+                avg_output.append(ensemble_avg)
+                std_output.append(ensemble_std)
 
                 
             #necessary for break condition
-            if len(lh_output):
-                #saving structure
-                data = np.array(lh_output)
-                np.savetxt(f"{path}.txt", data[:,6])
-                no_int = data[0]
-                int_avg = np.mean(data[1:], axis=0)
-                int_std = np.std(data[1:], ddof=1, axis=0)
-                t_grid = int_avg[0] # arbitrary whether no_int or int_avg
-                diff_gis = int_avg[1] - no_int[1]
-                diff_thc = int_avg[2] - no_int[2]
-                diff_wais = int_avg[3] - no_int[3]
-                diff_amaz = int_avg[4] - no_int[4]
-                diff_nino = int_avg[5] - no_int[5]
-                diff_assi = int_avg[6] - no_int[6]
-                int_n_tipped = int_avg[7]
-                no_int_n_tipped = no_int[7]
-                final_results[key] = int_n_tipped - no_int_n_tipped
-                #plotting structure
-                fig = plt.figure()
-                plt.grid(True)
-                # plt.title("Coupling strength: {}\n  Wais to Thc:{}  Amaz to Nino:{} Thc to Amaz:{} \n Tlim={}°C Tpeak={}°C tconv={}yr".format(
-                #     np.round(strength, 2), kk[0], kk[1], kk[2], T_lim, T_peak_det, t_conv_det))
-                # plt.plot(time, state_gis, label="GIS", color='c')
-                # plt.plot(time, state_thc, label="THC", color='b')
-                # plt.plot(time, state_wais, label="WAIS", color='k')
-                # plt.plot(time, state_amaz, label="AMAZ", color='g')
-                # plt.plot(time, state_nino, label="NINO", color='y')
-                for i, data_strength in enumerate(data[1:]):
-                    plt.plot(t_grid, data_strength[7], label=f"Interactions: 0.{i+1}")
-                plt.plot(t_grid, no_int_n_tipped, label="No interactions", color='y')
-                plt.title(f"Temperature properties: {key}")
-                plt.xlabel("Time [yr]")
-                plt.ylabel("Tipped elements")
-                plt.legend(loc='best')  # , ncol=5)
-                plt.tight_layout()
-                plt.savefig("{}/{}_feedbacks/network_{}_{}_{}/feedbacks_Tlim{}_Tpeak{}_tconv{}.pdf".format(long_save_name, namefile, 
+            if len(avg_output):
+                characteristic = quad(forcing, 0, t_end)
+                output = [] # mostly so it doesnt annoy me in debugger
+                data = np.array(avg_output)
+                t_grid = data[0,0]
+                # What do I want to see? Avgs and stds
+                # I want to see how many elements tipped after 100, 1000, 50000 years
+                close_index = np.argmin(np.abs(t_grid-100))
+                medium_index = np.argmin(np.abs(t_grid-1000))
+                far_index = -1
+                # How this differs between different strengths
+                # Eventually disregard non-tipping elements
+                np.save(f"{path}_close", data[:,:,close_index])
+                np.save(f"{path}_medium", data[:,:,medium_index])
+                np.save(f"{path}_far", data[:,:,far_index])
+                np.save(f"{path}_total_tipped", data[:,7])
+                fig, ax = plt.subplots()
+                set_colormap(ax, data.shape[0])
+                for i, data_strength in enumerate(data):
+                    ax.plot(t_grid, data_strength[7], label=f"Interactions: 0.{i}")
+                ax.set_title(f"Temperature properties: {key}")
+                ax.set_xlabel("Time [yr]")
+                ax.set_ylabel("Tipped elements")
+                # ax.legend(loc='best')  # , ncol=5)
+                fig.savefig("{}/{}_feedbacks/network_{}_{}_{}/feedbacks_Tlim{}_Tpeak{}_tconv{}.pdf".format(long_save_name, namefile, 
                     kk[0], kk[1], kk[2], T_lim, T_peak_det, t_conv_det))
                 #plt.show()
                 plt.clf()
