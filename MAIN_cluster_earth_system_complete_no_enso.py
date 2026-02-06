@@ -21,6 +21,7 @@ from netCDF4 import Dataset
 import cProfile
 from scipy.integrate import odeint, quad
 from tqdm import tqdm
+import pandas as pd
 
 # private imports from sys.path
 from core.evolve import evolve
@@ -49,14 +50,13 @@ params = [0.9183029815394349, 2.3885370105887995, 1.992801071295943, 3.988796447
 
 
 #Names to create the respective directories
-namefile = "no"
 long_save_name = "results"
 
 #######################GLOBAL VARIABLES##############################
 #drive coupling strength
 coupling_strength = np.linspace(0.0, 1.0, 11, endpoint=True)
 #temperature input (forced with generated overshoot inputs)
-temperature_trajs = np.loadtxt(r"temp_input\Tpeak_tconv_values\temp_input_values.txt", comments=['#']) #T_peak T_lim t_conv R mu_0 mu_1
+temperature_trajs = np.loadtxt(r"temp_input\Tpeak_tconv_values\temp_input_values.txt", skiprows=1) #T_peak T_lim t_conv R mu_0 mu_1
 
 def forcing_function(T_0, mu_0, mu_1, T_lim, R):
     """Returns forcing functions (here just a parametric temperature curve)
@@ -129,7 +129,6 @@ def set_colormap(ax, data_length):
 
 ################################# MAIN LOOP #################################
 def main():
-    final_results = {}
     for kk in plus_minus_links:
         print("Wais to Thc:{}".format(kk[0]))
         print("Amaz to Nino:{}".format(kk[1]))
@@ -140,14 +139,9 @@ def main():
             os.makedirs("{}".format(long_save_name))
 
         try:
-            os.stat("{}/{}_feedbacks".format(long_save_name, namefile))
+            os.stat("{}/network_{}_{}_{}".format(long_save_name, kk[0], kk[1], kk[2]))
         except:
-            os.mkdir("{}/{}_feedbacks".format(long_save_name, namefile))
-
-        try:
-            os.stat("{}/{}_feedbacks/network_{}_{}_{}".format(long_save_name, namefile, kk[0], kk[1], kk[2]))
-        except:
-            os.mkdir("{}/{}_feedbacks/network_{}_{}_{}".format(long_save_name, namefile, kk[0], kk[1], kk[2]))
+            os.mkdir("{}/network_{}_{}_{}".format(long_save_name, kk[0], kk[1], kk[2]))
 
         # try:
         #     os.stat("{}/{}_feedbacks/network_{}_{}_{}/{}".format(long_save_name, namefile, kk[0], kk[1], kk[2], str(mc_dir).zfill(4) ))
@@ -157,29 +151,29 @@ def main():
         #save starting conditions
         # np.savetxt("{}/{}_feedbacks/network_{}_{}_{}/{}/empirical_values.txt".format(long_save_name, namefile, kk[0], kk[1], kk[2], str(mc_dir).zfill(4)), sys_var, delimiter=" ", fmt="%s")
 
-        for i in temperature_trajs[1:2]:
+        for temperature_traj in tqdm(temperature_trajs):
             T_0 = 1.0
-            T_peak_det = i[0]
-            T_lim = i[1]
-            t_conv_det = i[2]
-            R = i[3]
-            mu_0 = i[4]
-            mu_1 = i[5]
+            T_peak_det = temperature_traj[0]
+            T_lim = temperature_traj[1]
+            t_conv_det = temperature_traj[2]
+            R = temperature_traj[3]
+            mu_0 = temperature_traj[4]
+            mu_1 = temperature_traj[5]
             key = f"T_peak:{T_peak_det},T_lim:{T_lim},t_conv:{t_conv_det}"
             print("T_lim: {}°C".format(T_lim))
             print("T_peak: {}°C".format(T_peak_det))
             print("t_conv: {}yrs".format(t_conv_det))
             
-            n_steps = 500
+            n_steps = 1000
             avg_output = []
             std_output = []
             
             for strength in coupling_strength:
-                print("Coupling strength: {}".format(strength))
+                # print("Coupling strength: {}".format(strength))
                 # How many points are to be calculated. odeint's precision is mostly independent of this, taking adaptive steps
                 output = np.zeros((input_file.shape[0], 8, n_steps))
 
-                for i, sys_var in enumerate(tqdm(input_file)):
+                for i, sys_var in enumerate(input_file):
                     values = list(map(float, sys_var)) # -1 is the mc_dir
                     params_dict = dict(zip(keys, values))
                     earth_params_raw = EarthParams(**params_dict)
@@ -198,8 +192,8 @@ def main():
                         conv_fac_gis = 1.0
                     
                     
-                    path = "{}/{}_feedbacks/network_{}_{}_{}/feedbacks_Tlim{}_Tpeak{}_tconv{}_{:.2f}".format(long_save_name, 
-                        namefile, kk[0], kk[1], kk[2], T_lim, T_peak_det, t_conv_det, strength)
+                    path = "{}/network_{}_{}_{}/feedbacks_Tlim{}_Tpeak{}_tconv{}_{:.2f}".format(long_save_name, 
+                        kk[0], kk[1], kk[2], T_lim, T_peak_det, t_conv_det, strength)
                     if os.path.isfile(path) == True:
                         abs_path = os.path.abspath(path)
                         print(abs_path)
@@ -210,6 +204,7 @@ def main():
                     # scale the tempearture properly
                     forcing = lambda t: forcing_function(T_0, mu_0, mu_1, T_lim, R)(t*conv_fac_gis)
                     net = earth_network(earth_params, forcing, strength, kk[0], kk[1], kk[2])
+                    
                     # initialize state
                     initial_state = [-1, -1, -1, -1, -1, -1] #initial state
                     # plotter.network(net)
@@ -231,7 +226,7 @@ def main():
                 
             #necessary for break condition
             if len(avg_output):
-                characteristic = quad(forcing, 0, t_end)
+                characteristic = int(quad(forcing, 0, 1000/conv_fac_gis)[0]*conv_fac_gis) # renorm to account for different conv facs between parametrisations
                 output = [] # mostly so it doesnt annoy me in debugger
                 data = np.array(avg_output)
                 t_grid = data[0,0]
@@ -242,20 +237,19 @@ def main():
                 far_index = -1
                 # How this differs between different strengths
                 # Eventually disregard non-tipping elements
-                np.save(f"{path}_close", data[:,:,close_index])
-                np.save(f"{path}_medium", data[:,:,medium_index])
-                np.save(f"{path}_far", data[:,:,far_index])
-                np.save(f"{path}_total_tipped", data[:,7])
+                np.save(f"{path}_{characteristic}_close", data[:,:,close_index])
+                np.save(f"{path}_{characteristic}_medium", data[:,:,medium_index])
+                np.save(f"{path}_{characteristic}_far", data[:,:,far_index])
+                np.save(f"{path}_{characteristic}_total_tipped", data[:,7])
                 fig, ax = plt.subplots()
                 set_colormap(ax, data.shape[0])
-                for i, data_strength in enumerate(data):
-                    ax.plot(t_grid, data_strength[7], label=f"Interactions: 0.{i}")
+                for temperature_traj, data_strength in enumerate(data):
+                    ax.plot(t_grid, data_strength[7], label=f"Interactions: 0.{temperature_traj}")
                 ax.set_title(f"Temperature properties: {key}")
                 ax.set_xlabel("Time [yr]")
                 ax.set_ylabel("Tipped elements")
                 # ax.legend(loc='best')  # , ncol=5)
-                fig.savefig("{}/{}_feedbacks/network_{}_{}_{}/feedbacks_Tlim{}_Tpeak{}_tconv{}.pdf".format(long_save_name, namefile, 
-                    kk[0], kk[1], kk[2], T_lim, T_peak_det, t_conv_det))
+                fig.savefig(f"{path}.pdf")
                 #plt.show()
                 plt.clf()
                 plt.close()
@@ -263,7 +257,7 @@ def main():
 
 
         current_dir = os.getcwd()
-        os.chdir("{}/{}_feedbacks/network_{}_{}_{}/".format(long_save_name, namefile, kk[0], kk[1], kk[2]))
+        os.chdir("{}/network_{}_{}_{}/".format(long_save_name, kk[0], kk[1], kk[2]))
         pdfs = np.array(np.sort(glob.glob("feedbacks_*.pdf"), axis=0))
         if len(pdfs) != 0.:
             merger = PdfMerger()
@@ -276,8 +270,47 @@ def main():
             print("Complete PDFs merged")
         os.chdir(current_dir)
 
+        for keyword in ["close", "medium", "far"]:
+            filenames = glob.glob(f"results/no_feedbacks/network_1.0_1.0_1.0/*{keyword}.npy")
+            n_temps = len(filenames)
+            results_array = np.zeros((n_temps, *np.load(filenames[0]).shape))
+            characteristics =  np.zeros(n_temps)
+            for i, filename in enumerate(filenames):
+                data = np.load(filename)
+                match = re.search(r'([0-9]+\.[0-9]+)(?!.*[0-9]+\.[0-9]+)', filename)
+                results_array[i] = data
+                characteristic = match.group(1)
+                characteristics[i] = float(characteristic)
+            strengths = np.arange(0.0, 1.01, 0.1)
+            components = ["time", "gis", "thc", "wais", "amaz", "nino", "assi", "total"]
+            index = pd.MultiIndex.from_product([characteristics, strengths, components], names=["characteristic", "strength", "component"])
+            results_df = pd.DataFrame({"value": results_array.reshape(-1)}, index=index)
+            results_df = results_df.drop(index="time", level="component")
+            results_df.to_csv(f"{keyword}.csv")
+
     print("Finish")
-main()
+
+def rename_characteristic():
+    filenames = glob.glob(f"results/no_feedbacks/network_1.0_1.0_1.0/*.npy")
+    temp_df = pd.DataFrame(temperature_trajs, columns=["Tpeak", "Tlim", "tconv", "R", "mu0", "mu1"])
+    temp_idx_df = temp_df.set_index(["Tlim", "Tpeak", "tconv"])
+    for filename in filenames:
+        m = re.search(
+            r'Tlim(?P<Tlim>[0-9]+(?:\.[0-9]+)?)_'
+            r'Tpeak(?P<Tpeak>[0-9]+(?:\.[0-9]+)?)_'
+            r'tconv(?P<tconv>[0-9]+(?:\.[0-9]+)?)',
+            filename
+        )
+        vals = {k: float(v) for k, v in m.groupdict().items()}
+        row = temp_idx_df.loc[tuple(vals[k] for k in temp_idx_df.index.names)]
+        forcing = forcing_function(1.0, row["mu0"], row["mu1"], vals["Tlim"], row["R"])
+        characteristic = np.round((quad(forcing, 0, 500)[0]), 2)
+        new_filename = re.sub(r'([0-9]+\.[0-9]+)(?!.*[0-9]+\.[0-9]+)', str(characteristic), filename)
+
+        os.rename(filename, new_filename)
+
+
+rename_characteristic()
 # Good lord
 # The original Code steps in 0.1 (absolute? idk) year steps through the solver (because the stepsize is far greater than the calibrated(?) t_end)
 # However, it takes its Temperature curve as if it made 1 year steps (every step a new year)

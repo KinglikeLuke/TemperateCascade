@@ -216,3 +216,5 @@ __marimo__/
 .streamlit/secrets.toml
 
 results/
+earth_sys/earth_no_enso.py
+analysis_results/
