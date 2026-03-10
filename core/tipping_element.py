@@ -25,7 +25,7 @@ class tipping_element:
         return self._type
 
     def get_par(self):
-        return self._par
+        return self._par.copy()
 
     def set_par(self, key, val):
         self._par[key] = val
@@ -85,6 +85,9 @@ class t_cusp(cusp):
     """
     def __init__(self, a, b, c):
         """Constructor with additional parameters for cusp"""
+        if isinstance(c, float):
+            c_t = c
+            c = lambda t: c_t
         super().__init__(a, b, c)
         self._type = 't_cusp'
         
@@ -111,8 +114,23 @@ class linear(tipping_element):
         return lambda t, x : self._par['a']
 
     def tip_state(self):
-        return lambda x: x > 0 # ehhhhhhhhh
+        return lambda x: x > 0
 
+class state_intervention(tipping_element):
+    def __init__(self):
+        super().__init__()
+
+    def tip_state(self):
+        return lambda x: x > 0 
+    
+class derivative_intervention(cusp):
+    """
+    To force the effect of the tipping process, I set c so that it is always 1°C below the simulation temperature
+    """
+    def __init__(self, a, b, c):
+        c = b*1.5*(4 / 27)**0.5 # means 1.5x the limiting temperature
+        super().__init__(a, b, c)
+    
 class hopf(tipping_element):
     """Concrete class for tipping_elements following the dynamics of a
     Hopfbifurcation.

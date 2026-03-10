@@ -42,7 +42,7 @@ class global_functions():
         if x >= x1:
             y1 = 0.0
             y2 = np.sqrt(4 / 27)
-            y = (y2 - y1) / (x2 - x1) * (x - x1) + y1 # y2*T/x2
+            y = (y2 - y1) / (x2 - x1) * (x - x1) + y1 # y2*T/T_thresh
             return y
         else:
             return 0.0

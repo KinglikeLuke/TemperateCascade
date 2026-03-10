@@ -47,6 +47,24 @@ class EarthParams:
     pf_thc_to_amaz: float
     pf_thc_to_assi: float
 
+    @property
+    def df_gis_to_thc(self):
+        """ mediates between pf and the factor necessary to get the same effect from derivative coupling. Factors are hardcoded, somewhat uglyly, but the input is due to monte carlos sampling anyway
+        """
+        if self.pf_gis_to_thc > 1:
+            return (self.pf_gis_to_thc - 1) * 0.35/9 * self.gis_time
+        else:
+            return self.pf_gis_to_thc * self.gis_time
+        
+    @property
+    def df_wais_to_thc(self):
+        """ mediates between pf and the factor necessary to get the same effect from derivative coupling. Factors are hardcoded, somewhat uglyly, but the input is due to monte carlos sampling anyway
+        """
+        if self.pf_gis_to_thc > 1:
+            return (self.pf_wais_to_thc - 1) * 0.15/2 * self.wais_time
+        else:
+            return 0.7109571 * self.pf_wais_to_thc + 0.94770077 # arrived at by curve fit
+
 def earth_network(earth_params: EarthParams, temperature, strength, kk0, kk1, kk2):
     """Create the Earth system tipping network.
 
@@ -81,10 +99,12 @@ def earth_network(earth_params: EarthParams, temperature, strength, kk0, kk1, kk
     net.add_coupling(2, 0, linear_coupling(strength=(1.0 / earth_params.gis_time) * strength * earth_params.pf_wais_to_gis, x_0=-1))
 
     # Derivative coupling maybe a bit rash
-    net.add_coupling(0, 1, cusp_derivative_coupling(strength=(1.0 / earth_params.thc_time) * strength * earth_params.pf_gis_to_thc, params=gis.get_par(), x_0=0))
-    net.add_coupling(2, 1, cusp_derivative_coupling(strength=(1.0 / earth_params.thc_time) * strength * earth_params.pf_gis_to_thc, params=wais.get_par(), x_0=0))
-    net.add_coupling(4, 1, linear_coupling(strength=(1.0 / earth_params.thc_time) * strength * earth_params.pf_nino_to_thc*kk1, x_0=-1)) # dont
-    net.add_coupling(5, 1, linear_coupling(strength=(1.0 / earth_params.assi_time) * strength * earth_params.pf_assi_to_thc, x_0=-1))
+    # net.add_coupling(0, 1, linear_coupling(strength=(1.0 / earth_params.thc_time) * strength * earth_params.pf_gis_to_thc, x_0=-1))
+    # net.add_coupling(2, 1, linear_coupling(strength=(1.0 / earth_params.thc_time) * strength * earth_params.pf_gis_to_thc, x_0=-1))
+    net.add_coupling(0, 1, cusp_derivative_coupling(strength=(1.0 / earth_params.thc_time) * strength * earth_params.df_gis_to_thc, params=gis.get_par())) # pretty substantial impact on performance (20% more)
+    net.add_coupling(2, 1, cusp_derivative_coupling(strength=(1.0 / earth_params.thc_time) * strength * earth_params.df_wais_to_thc, params=wais.get_par()))
+    net.add_coupling(4, 1, linear_coupling(strength=(1.0 / earth_params.thc_time) * strength * earth_params.pf_nino_to_thc*kk1, x_0=-1))
+    net.add_coupling(5, 1, linear_coupling(strength=(1.0 / earth_params.thc_time) * strength * earth_params.pf_assi_to_thc, x_0=-1))
 
     net.add_coupling(0, 2, linear_coupling(strength=(1.0 / earth_params.wais_time) * strength * earth_params.pf_gis_to_wais, x_0=-1))
     net.add_coupling(1, 2, linear_coupling(strength=(1.0 / earth_params.wais_time) * strength * earth_params.pf_thc_to_wais, x_0=-1))

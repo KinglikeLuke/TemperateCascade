@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 sns.set(font_scale=1.25)
-from pyDOE import * #function name >>> lhs
+from pyDOE import lhs #function name >>> lhs
 
 elements = {}
 #Tipping limits, see Schellnhuber, et al., 2016:
@@ -15,14 +15,14 @@ elements["limits_nino"] = [3.0, 6.0]
 elements["limits_assi"] = [1.3, 2.9]
 
 ###################################################
-# for now also rosser 2024
+# for now also rosser 2024. Generally they are the ad-hoc conversions from pf to interaction strength as in Wunderling 2019
 #TO GIS
 elements["pf_wais_to_gis"] = [0.1, 0.2]
 elements["pf_thc_to_gis"] = [0.1, 1.]
 # TO THC
-elements["pf_gis_to_thc"] = [0.1, 1.]
+elements["pf_gis_to_thc"] = [1., 10.] # actual PF
 elements["pf_nino_to_thc"] = [0.1, 0.2]
-elements["pf_wais_to_thc"] = [0.1, 0.3] 
+elements["pf_wais_to_thc"] = [0.3, 3] # actual PF 
 elements["pf_assi_to_thc"] = [0.1, 0.5]
 # TO WAIS"
 elements["pf_nino_to_wais"] = [0.1, 0.5]

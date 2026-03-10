@@ -11,8 +11,8 @@ import statsmodels.api as sm
 from scipy.integrate import quad
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
-from matplotlib import colorbar as cbar
-import matplotlib as mpl
+from matplotlib import colorbar as plt_cbar
+from matplotlib import colors
 plt.rcParams.update({
     "text.usetex": True,               # Use LaTeX for all text
     "font.family": "sans-serif",      # Use sans serif font family
@@ -23,8 +23,8 @@ plt.rcParams.update({
     "legend.fontsize": 8,             # Legend font size
     "xtick.labelsize": 8,
     "ytick.labelsize": 8,
-        "ytick.direction": "in",
-    "xtick.direction": "in",
+        "ytick.direction": "out",
+    "xtick.direction": "out",
     'figure.constrained_layout.use': True,
     "legend.frameon":    False,
     "figure.dpi": 300
@@ -121,11 +121,11 @@ def imshow_grid(
             origin="lower",
             aspect="auto",
             vmin=vmin,
-            vmax=vmax,
+            vmax=1.5, #TODO ugly hack
             cmap="inferno",
         #    interpolation="bilinear"
         )
-        ax.set_title(title)
+        # ax.set_title(title, loc='left', fontsize='small')
 
     if xlabel:
         fig.supxlabel(xlabel)
@@ -142,6 +142,7 @@ def imshow_grid(
         axes[0].set_yticklabels(y_ticklabels)
 
     cbar = fig.colorbar(im, ax=axes[:len(axes)//2], shrink=0.8)
+    #cbar.ax.set_yticks([0, 0.5, 1, np.round(vmax, 1)[0]], [0, 0.5, 1, np.round(vmax, 1)[0]])
     if cbar_label:
         cbar.set_label(cbar_label)
 
@@ -262,6 +263,7 @@ def read_files(suffix, time):
     )
     strength_index = pd.Index(strengths, name="strength")
     component_index = pd.Index(components, name="component")
+    # TODO name value column "value"
     long_df = (
         pd.DataFrame(
             results_array.reshape(len(temperature_props), -1),
@@ -344,7 +346,7 @@ def plot_legend(ax, cax=None):
             else [ax])[0].get_figure(root=False)
         current_ax = fig.gca()
 
-        cax, kwargs = cbar.make_axes(ax, aspect=1, pad=0)
+        cax, kwargs = plt_cbar.make_axes(ax, aspect=1, pad=0)
         # make_axes calls add_{axes,subplot} which changes gca; undo that.
         fig.sca(current_ax)
     else:
@@ -369,7 +371,58 @@ def plot_legend(ax, cax=None):
     cax.axis('off')
     return cax
 
-def dataframe_ify(long_df:pd.DataFrame, new_data):
+def shiftedColorMap(cmap, start=0, midpoint=0.5, stop=1.0, name='shiftedcmap'):
+    '''
+    Function to offset the "center" of a colormap. Useful for
+    data with a negative min and positive max and you want the
+    middle of the colormap's dynamic range to be at zero.
+
+    Input
+    -----
+      cmap : The matplotlib colormap to be altered
+      start : Offset from lowest point in the colormap's range.
+          Defaults to 0.0 (no lower offset). Should be between
+          0.0 and `midpoint`.
+      midpoint : The new center of the colormap. Defaults to 
+          0.5 (no shift). Should be between 0.0 and 1.0. In
+          general, this should be  1 - vmax / (vmax + abs(vmin))
+          For example if your data range from -15.0 to +5.0 and
+          you want the center of the colormap at 0.0, `midpoint`
+          should be set to  1 - 5/(5 + 15)) or 0.75
+      stop : Offset from highest point in the colormap's range.
+          Defaults to 1.0 (no upper offset). Should be between
+          `midpoint` and 1.0.
+    '''
+    cdict = {
+        'red': [],
+        'green': [],
+        'blue': [],
+        'alpha': []
+    }
+
+    # regular index to compute the colors
+    reg_index = np.linspace(start, stop, 257)
+
+    # shifted index to match the data
+    shift_index = np.hstack([
+        np.linspace(0.0, midpoint, 128, endpoint=False), 
+        np.linspace(midpoint, 1.0, 129, endpoint=True)
+    ])
+
+    for ri, si in zip(reg_index, shift_index):
+        r, g, b, a = cmap(ri)
+
+        cdict['red'].append((si, r, r))
+        cdict['green'].append((si, g, g))
+        cdict['blue'].append((si, b, b))
+        cdict['alpha'].append((si, a, a))
+
+    newcmap = colors.LinearSegmentedColormap(name, cdict)
+    plt.register_cmap(cmap=newcmap)
+
+    return newcmap
+
+def dataframeify(long_df:pd.DataFrame, new_data):
     new_df = long_df.copy().xs("total", level="component")
     new_df[:] = new_data
 
@@ -380,103 +433,145 @@ def dataframe_ify(long_df:pd.DataFrame, new_data):
     )
     return new_df
 
-traj_results = glob.glob("results/*total_tipped.npy")
+def interaction_difference(df, component):
+    feature = df.xs(component, level="component")
+    return (feature.xs(1.0, level="strength") - feature.xs(0.0, level="strength")).droplevel("integral")
+
 temp_df = pd.read_csv(r"temp_input\Tpeak_tconv_values\temp_input_values.txt", dtype=float, delimiter=" ", comment="#")
-#temp_df = pd.DataFrame(temperature_trajs, columns=["Tpeak", "Tlim", "tconv", "R", "mu0", "mu1"])
 temp_idx_df = temp_df.set_index(["T_lim", "T_peak", "t_conv"])
 timeframes = {#"close": 100, 
               "medium":1000, 
               "far":1000}
 
-for keyword, timeframe in timeframes.items():
-
-    long_df = read_files(keyword, timeframe)
-    long_df = long_df.drop(2.0, level="Tpeak")
-    feature_df = long_df.xs("total", level="component")
-
-    X = feature_df.reset_index(name="value")[["Tlim", "Tpeak", "tconv", "strength"]].to_numpy()
-    y_total = feature_df.values
-    y_gis = long_df.xs("GIS", level="component").values
-    y_wais = long_df.xs("WAIS", level="component").values
-    y_amoc = long_df.xs("AMOC", level="component").values
-    y_ar = long_df.xs("Amazonas", level="component").values
-
-    # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-    # # Forest gets absolutely overfitted to regular Temperature and strength features
-    # regr = ensemble.RandomForestRegressor(n_estimators=5, max_depth=4)
-    # regr.fit(X_train, y_train)
-    # r2=1-np.sum((regr.predict(X_test)-y_test)**2)/np.sum((y_test-np.mean(y_test))**2)
-    # r2_adj = 1-(1-r2)*(y_train.size-1)/(y_train.size-1-sum(tree.tree_.node_count for tree in regr.estimators_)*5)
-
-
-    GIS_diff = loess(X, y_gis)
-    WAIS_diff = loess(X, y_wais)
-    AMOC_diff = loess(X, y_amoc)
-    AR_diff = loess(X, y_ar)
-    # total_diff = loess(X, y_total, 0.2)
-    total_diff_df = (feature_df.xs(1.0, level="strength") - feature_df.xs(0.0, level="strength")).droplevel("integral") 
-    # total_diff_df /= feature_df.xs(0.0, level="strength").droplevel("integral")
-    cfg_gis = prepare_impact_plot(dataframe_ify(long_df, GIS_diff))
-    cfg_impact = prepare_impact_plot(impact_df=total_diff_df, Tlim=[0.,1.,2.])
-    cfg_wais = prepare_impact_plot(dataframe_ify(long_df, WAIS_diff))
-    cfg_amoc = prepare_impact_plot(dataframe_ify(long_df, AMOC_diff))
-    cfg_ar = prepare_impact_plot(dataframe_ify(long_df, AR_diff))
-
-    fig, axes = imshow_grid(
-        **cfg_impact,
-        nrows=2,
-        ncols=3,
-        figsize=set_plot_size("article"),
-        xlabel="Convergence time / a",
-        ylabel=r"Peak temperature / $^\circ C$",
-        cbar_label="Total impact",
-    )
-    element_tlim_index = 2
-    # fig, axes = plt.subplots(1, 3, figsize=set_plot_size("article", subplots=(1, 4)), sharey=True, sharex=True)
-    # axes[0].imshow(cfg_impact["matrices"][0], origin="lower", aspect="auto", vmin=cfg_impact["vmin"], vmax=cfg_impact["vmax"],cmap="inferno")
-    # axes[0].set_title(cfg_impact["titles"][0])
-
-    # im = axes[1].imshow(cfg_impact["matrices"][element_tlim_index], origin="lower", aspect="auto", vmin=cfg_impact["vmin"], vmax=cfg_impact["vmax"], cmap="inferno")
-    # axes[1].set_title(cfg_impact["titles"][element_tlim_index])
-    # fig.supxlabel("Convergence time / a")
-    # fig.supylabel("Peak temperature / ^\circ C")
-    # axes[0].set_yticks(cfg_impact["y_ticks"])
-    # axes[0].set_yticklabels(cfg_impact["y_ticklabels"])
-    # for ax in axes:
-    #    ax.set_xticks(cfg_impact["x_ticks"])
-    #    ax.set_xticklabels(cfg_impact["x_ticklabels"])
-    rgb_matrix = np.array([
-        cfg_ar["matrices"][element_tlim_index],
-        cfg_amoc["matrices"][element_tlim_index], 
-        cfg_gis["matrices"][element_tlim_index], 
-        ]).transpose((1,2,0))
-    # rgb_matrix /= np.sum(rgb_matrix, axis=-1)[:,:, None]
-    # axes[-1].imshow(rgb_matrix, origin="lower", aspect="auto")
-    # axes[-1].set_title(rf"{cfg_impact["titles"][element_tlim_index]}, per Element")
-    # cax=plot_legend(axes)
-    axes[3].imshow(cfg_amoc["matrices"][element_tlim_index], origin="lower", aspect="auto", vmin=rgb_matrix.min(), vmax=rgb_matrix.max())
-    axes[3].set_title(f"{cfg_impact["titles"][element_tlim_index]}, AMOC")
-    axes[4].imshow(cfg_gis["matrices"][element_tlim_index], origin="lower", aspect="auto", vmin=rgb_matrix.min(), vmax=rgb_matrix.max())
-    axes[4].set_title(f"{cfg_impact["titles"][element_tlim_index]}, GIS")
-    im = axes[5].imshow(cfg_ar["matrices"][element_tlim_index], origin="lower", aspect="auto", vmin=rgb_matrix.min(), vmax=rgb_matrix.max())
-    axes[5].set_title(f"{cfg_impact["titles"][element_tlim_index]}, AR")
-
-    colorbar = fig.colorbar(im, ax=axes[3:])
-    colorbar.set_label("Element impact")
-
-    components = ["AMOC", "GIS", "Amazonas", "total"]
-    cfg_tipping = prepare_tipping_plot(long_df, components)
-    nrows = 2 if len(components) > 1 else 1
-    ncols = int(np.ceil(len(components) / nrows))
-    # imshow_grid(
-    #     **cfg_tipping,
-    #     nrows=nrows,
-    #     ncols=ncols,
-    #     figsize=(4 * nrows, 3 * ncols),
-    #     xlabel="Integrated Temperature index",
-    #     ylabel="Interaction strength",
-    #     cbar_label="value",
-    # )
-    plt.show()
+def overshoot_plot(ax:Axes):
+    vals = {"T_lim": 1.0, "t_conv": 300, "T_peak":4.0}
+    row = temp_idx_df.loc[tuple(vals[k] for k in temp_idx_df.index.names)]
+    forcing = forcing_function(1.0, row["mu_0"], row["mu_1"], vals["T_lim"], row["R"])
+    time = np.linspace(0, 500, 100)
+    inner_color = 'w' # "#30736A"
+    arrowprops = dict(arrowstyle="-", color=inner_color, shrinkA=0, shrinkB=1, lw=0.5) #dict(arrowstyle="->") #, connectionstyle="angle,angleA=0,angleB=90,rad=10")
+    ax.plot(time, forcing(time), c=inner_color)
+    ax.vlines(vals["t_conv"], ymin=0, ymax = forcing(vals["t_conv"]), color=inner_color, ls=':')
+    ax.hlines(vals["T_peak"], xmin = 0, xmax = time[np.argmax(forcing(time))], color=inner_color, ls=':')
+    ax.axhline(vals["T_lim"], ls=':', c=inner_color)
+    ax.set_xlim(0, 500)
+    ax.set_ylim(0, 4.6)
+    ax.annotate(r"$T_\mathrm{lim}$", (500, vals["T_lim"]), (440, vals["T_lim"] +  0.55), arrowprops=arrowprops, fontsize="x-small",  ha="right", color=inner_color)
+    ax.annotate(r"$T_\mathrm{peak}$", (time[np.argmax(forcing(time))], vals["T_peak"]), (time[np.argmax(forcing(time))]+90, vals["T_peak"]-0.1), 
+                arrowprops=arrowprops, fontsize="x-small", color=inner_color)
+    ax.annotate(r"$t_\mathrm{conv}$", (vals["t_conv"], 0), (vals["t_conv"]-80, 0.22), arrowprops=arrowprops, fontsize="x-small", ha="right", color=inner_color)
+    ax.set_yticks([])
+    ax.set_xticks([])
+    ax.set_title("Overshoot", fontsize="x-small", c="w", pad=0)
+    outer_color = inner_color # "#14312d"  #"#30736A"
+    ax.set_xlabel(r"$t$", fontsize="x-small", labelpad=1, color=outer_color)
+    ax.set_ylabel(r"$\Delta$GMT", fontsize="x-small", labelpad=-0.1, color=outer_color) 
+    ax.spines['bottom'].set_color(inner_color)
+    ax.spines['top'].set_color(inner_color) 
+    ax.spines['right'].set_color(inner_color)
+    ax.spines['left'].set_color(inner_color)
 
 
+def main():
+    for keyword, timeframe in timeframes.items():
+        long_df = read_files(keyword, timeframe)
+        df = pd.read_csv(r"C:\Users\lukas\Documents\TemperateCascade\results\network_1.0_1.0_1.0\dataframe.csv")
+        long_idx = pd.MultiIndex.from_frame(df.drop(columns="value"))
+        long_df = pd.DataFrame(df["value"].to_numpy(), index=long_idx)
+        long_df = long_df.xs(timeframe, level="year")
+        long_df = long_df.drop(2.0, level="Tpeak")
+        feature_df = long_df.xs("total", level="component")
+
+        # X = feature_df.reset_index()[["Tlim", "Tpeak", "tconv", "strength"]].to_numpy()
+        # y_total = feature_df.values
+        # y_gis = long_df.xs("GIS", level="component").values
+        # y_wais = long_df.xs("WAIS", level="component").values
+        # y_amoc = long_df.xs("AMOC", level="component").values
+        # y_ar = long_df.xs("Amazonas", level="component").values
+
+        # GIS_diff = loess(X, y_gis)
+        # WAIS_diff = loess(X, y_wais)
+        # AMOC_diff = loess(X, y_amoc)
+        # AR_diff = loess(X, y_ar)
+        # total_diff = loess(X, y_total, 0.2)
+
+        # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+        # # Forest gets absolutely overfitted to regular Temperature and strength features
+        # regr = ensemble.RandomForestRegressor(n_estimators=5, max_depth=4)
+        # regr.fit(X_train, y_train)
+        # r2=1-np.sum((regr.predict(X_test)-y_test)**2)/np.sum((y_test-np.mean(y_test))**2)
+        # r2_adj = 1-(1-r2)*(y_train.size-1)/(y_train.size-1-sum(tree.tree_.node_count for tree in regr.estimators_)*5)
+
+        total_diff_df = (feature_df.xs(1.0, level="strength") - feature_df.xs(0.0, level="strength")).droplevel("integral") 
+        # total_diff_df /= feature_df.xs(0.0, level="strength").droplevel("integral")
+        cfg_gis = prepare_impact_plot(interaction_difference(long_df, "GIS"))
+        cfg_impact = prepare_impact_plot(total_diff_df, Tlim=[0.,1.,2.])
+        cfg_wais = prepare_impact_plot(interaction_difference(long_df, "WAIS"))
+        cfg_amoc = prepare_impact_plot(interaction_difference(long_df, "AMOC"))
+        cfg_ar = prepare_impact_plot(interaction_difference(long_df, "Amazonas"))
+        cfg_impact["titles"] = [f"{chr(char)}" for char in range(97, 103)] # Look ma, I took a C course!  
+        fig, axes = imshow_grid(
+            **cfg_impact,
+            nrows=2,
+            ncols=3,
+            figsize=set_plot_size("article"),
+            xlabel="Convergence time / a",
+            ylabel=r"Peak temperature / $^\circ C$",
+            cbar_label=r"Impact on \# tipped",
+        )
+        element_tlim_index = 2
+
+        rgb_matrix = np.array([
+            cfg_ar["matrices"][element_tlim_index],
+            cfg_amoc["matrices"][element_tlim_index], 
+            cfg_gis["matrices"][element_tlim_index], 
+            ]).transpose((1,2,0))
+        vmax = rgb_matrix.max()
+        vmin = rgb_matrix.min()
+        diverging_map = "managua" #shiftedColorMap(plt.cm.coolwarm, 0, 1 - vmax / (vmax + abs(vmin)), 1)
+        divnorm = colors.TwoSlopeNorm(vcenter=0, vmin=-vmax, vmax=vmax)
+        axes[3].imshow(cfg_amoc["matrices"][element_tlim_index], origin="lower", aspect="auto", 
+                    cmap=diverging_map, norm=divnorm)
+        axes[4].imshow(cfg_ar["matrices"][element_tlim_index], origin="lower", aspect="auto",
+                    cmap=diverging_map, norm=divnorm)
+        im = axes[5].imshow(cfg_gis["matrices"][element_tlim_index], origin="lower", aspect="auto",
+                    cmap=diverging_map, norm=divnorm)
+        # axes[3].set_title(f"{cfg_impact["titles"][element_tlim_index]}, AMOC",loc='left', fontsize='small')
+        # axes[4].set_title(f"{cfg_impact["titles"][element_tlim_index]}, AR",loc='left', fontsize='small')
+        # axes[5].set_title(f"{cfg_impact["titles"][element_tlim_index]}, GIS",loc='left', fontsize='small')
+
+        for ax, title in zip(axes, cfg_impact["titles"]):
+            ax.set_title(title, loc='left', fontsize='medium')
+
+        colorbar = fig.colorbar(im, ax=axes[3:])
+        colorbar.set_label("Impact on element")
+        colorbar.ax.set_ylim(vmin-0.03, vmax) # cant go above b/c colorspace ends there
+        y_ticks = [np.round(vmin, 1), *np.arange(0, 1.6, 0.5)]
+        colorbar.ax.set_yticks(y_ticks, y_ticks) # get_yticks is useless as ever, so this needs to be hardcoded
+        overshoot_ax = axes[-1].inset_axes((0.49, 0.15, 0.5, 0.5))
+        overshoot_ax.patch.set_alpha(0.0)
+        inset_indicator = axes[-1].indicate_inset((2.5, 3.5, 1, 1), inset_ax=overshoot_ax, edgecolor='k', alpha=1, lw=0.5, transform=axes[-1].transData)
+
+        for connector in inset_indicator.connectors:
+            connector.set(color="w")
+        inset_indicator.connectors[0].set(visible=True)
+        inset_indicator.connectors[3].set(visible=False)
+        inset_indicator.rectangle.set(edgecolor="w")
+        overshoot_plot(overshoot_ax)
+        # components = ["AMOC", "GIS", "Amazonas", "total"]
+        # cfg_tipping = prepare_tipping_plot(long_df, components)
+        # nrows = 2 if len(components) > 1 else 1
+        # ncols = int(np.ceil(len(components) / nrows))
+        # imshow_grid(
+        #     **cfg_tipping,
+        #     nrows=nrows,
+        #     ncols=ncols,
+        #     figsize=(4 * nrows, 3 * ncols),
+        #     xlabel="Integrated Temperature index",
+        #     ylabel="Interaction strength",
+        #     cbar_label="value",
+        # )
+        plt.show()
+
+
+main()
