@@ -46,7 +46,6 @@ for i in data:
 	mu_0 = i[4]
 	mu_1 = i[5]
 
-
 	y = gamma(T_0, mu_0, T_lim, R) #y can also be fixed at 0.02
 	output = []
 	for t in t_vals:

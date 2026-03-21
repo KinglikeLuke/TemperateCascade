@@ -32,7 +32,7 @@ class tipping_network(DiGraph):
     def get_number_tipped( self, x):
         return np.count_nonzero( self.get_tip_states( x ) )
 
-    def f( self, x, t):
+    def f( self, t, x):
         f = np.zeros( self.number_of_nodes() )
         for node in self.nodes(data=True):
             ind = node[0]
@@ -45,7 +45,7 @@ class tipping_network(DiGraph):
             f[to_id] += lmd.__call__( t, x[from_id], x[to_id])
         return f
 
-    def jac(self, x, t):
+    def jac(self, t, x):
         jac = np.zeros((self.number_of_nodes(), self.number_of_nodes()))
         for node in self.nodes(data=True):
             ind = node[0]

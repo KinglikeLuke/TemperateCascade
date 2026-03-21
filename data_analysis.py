@@ -29,6 +29,8 @@ plt.rcParams.update({
     "legend.frameon":    False,
     "figure.dpi": 300
 })
+temp_df = pd.read_csv(r"temp_input\Tpeak_tconv_values\temp_input_values.txt", dtype=float, delimiter=" ", comment="#")
+temp_idx_df = temp_df.set_index(["T_lim", "T_peak", "t_conv"])
 
 def set_plot_size(width_type, fraction=1, subplots=(1, 1)):
     """Set figure dimensions to avoid scaling in LaTeX.
@@ -121,7 +123,7 @@ def imshow_grid(
             origin="lower",
             aspect="auto",
             vmin=vmin,
-            vmax=1.5, #TODO ugly hack
+            vmax=0.7, #TODO ugly hack
             cmap="inferno",
         #    interpolation="bilinear"
         )
@@ -313,7 +315,6 @@ def plot_legend(ax, cax=None):
 
             colors.append(rgb)
             points.append(xy)
-
     points = np.array(points)
     colors = np.array(colors)
 
@@ -437,12 +438,6 @@ def interaction_difference(df, component):
     feature = df.xs(component, level="component")
     return (feature.xs(1.0, level="strength") - feature.xs(0.0, level="strength")).droplevel("integral")
 
-temp_df = pd.read_csv(r"temp_input\Tpeak_tconv_values\temp_input_values.txt", dtype=float, delimiter=" ", comment="#")
-temp_idx_df = temp_df.set_index(["T_lim", "T_peak", "t_conv"])
-timeframes = {#"close": 100, 
-              "medium":1000, 
-              "far":1000}
-
 def overshoot_plot(ax:Axes):
     vals = {"T_lim": 1.0, "t_conv": 300, "T_peak":4.0}
     row = temp_idx_df.loc[tuple(vals[k] for k in temp_idx_df.index.names)]
@@ -473,9 +468,12 @@ def overshoot_plot(ax:Axes):
 
 
 def main():
+    timeframes = {#"close": 100, 
+                "medium":1000, 
+                "far":1000}
     for keyword, timeframe in timeframes.items():
         long_df = read_files(keyword, timeframe)
-        df = pd.read_csv(r"C:\Users\lukas\Documents\TemperateCascade\results\network_1.0_1.0_1.0\dataframe.csv")
+        df = pd.read_csv(r"C:\Users\lukas\Documents\PhD\TemperateCascade\results\network_1.0_1.0_1.0\2026-03-17_1\dataframe.csv")
         long_idx = pd.MultiIndex.from_frame(df.drop(columns="value"))
         long_df = pd.DataFrame(df["value"].to_numpy(), index=long_idx)
         long_df = long_df.xs(timeframe, level="year")
@@ -546,7 +544,7 @@ def main():
         colorbar = fig.colorbar(im, ax=axes[3:])
         colorbar.set_label("Impact on element")
         colorbar.ax.set_ylim(vmin-0.03, vmax) # cant go above b/c colorspace ends there
-        y_ticks = [np.round(vmin, 1), *np.arange(0, 1.6, 0.5)]
+        y_ticks = [np.round(vmin, 1), *np.arange(0, 1.0, 0.5)]
         colorbar.ax.set_yticks(y_ticks, y_ticks) # get_yticks is useless as ever, so this needs to be hardcoded
         overshoot_ax = axes[-1].inset_axes((0.49, 0.15, 0.5, 0.5))
         overshoot_ax.patch.set_alpha(0.0)

@@ -3,8 +3,9 @@ import sys
 import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.optimize import curve_fit
+from scipy.interpolate import interpolate
 from dataclasses import dataclass
-
+import pandas as pd
 import matplotlib.pyplot as plt
 
 # PyCascades imports
@@ -13,24 +14,22 @@ from core.tipping_element import cusp, linear, state_intervention, derivative_in
 from core.tipping_network import tipping_network
 from earth_sys.functions_earth_system_no_enso import global_functions
 
-from earth_sys.earth_no_enso import EarthParams
 
-KEYS = ['limits_gis','limits_thc','limits_wais','limits_amaz','limits_nino', 'limits_assi',
+KEYS = ['limits_gis','limits_thc','limits_wais','limits_amaz','limits_nino',
     'pf_wais_to_gis','pf_thc_to_gis',
-    'pf_gis_to_thc','pf_nino_to_thc','pf_wais_to_thc', 'pf_assi_to_thc',
+    'pf_gis_to_thc','pf_nino_to_thc','pf_wais_to_thc',
     'pf_nino_to_wais','pf_thc_to_wais','pf_gis_to_wais',
     'pf_thc_to_nino',
     'pf_nino_to_amaz', 'pf_thc_to_amaz',
-    'pf_thc_to_assi',
-    'gis_time','thc_time','wais_time','nino_time','amaz_time', 'assi_time']
-input_file = np.loadtxt(r"start_ensemble\latin_prob.txt", delimiter=" ")
+    'gis_time','thc_time','wais_time','nino_time','amaz_time']
+input_file = np.loadtxt(r"start_ensemble\latin_prob_calibration.txt", delimiter=" ")
 temperature = 2
 
 def hyperbolic_fct(x, a, b, c):
     return a/(x+b) + c
 
-def linear_fct(x, a, b):
-    return a*x + b
+def linear_fct(x, a):
+    return a*x + 1
 
 def sa(f):
     """
@@ -40,41 +39,27 @@ def sa(f):
     """
     return lambda t, y : f(y, t)
 
-def compare_with_intervention(cause:tipping_element, effect:tipping_element, coupling_strength):
-    net = tipping_network()
-    net.add_element(effect)
-    base_net = net.copy()
-    base_net.add_element(cause)
-    intervention_net = net.copy()
-    intervention_cause = derivative_intervention(**cause.get_par())
+def intervention_effect(cause:tipping_element, effect:tipping_element, coupling_strength, derivative):
+    intervention_net = tipping_network()
+    intervention_net.add_element(effect)
+    intervention_cause = derivative_intervention(**cause.get_par()) if derivative else state_intervention()
     intervention_net.add_element(intervention_cause)
-    # Note: get_par() needs to be amended to make copy
-    # base_net.add_coupling(1, 0, cusp_derivative_coupling(strength=coupling_strength, 
-    #                                             params=cause.get_par(), 
-    #                                             ))
-    intervention_net.add_coupling(1, 0, cusp_derivative_coupling(strength=coupling_strength, 
-                                                        params=intervention_cause.get_par(),
-                                                        ))
-    base_state = [-1, -1]
-    intervention_state = [-1, -1]
-    t = (0, 50000)
-
-    # gotta rem
-    def cause_tip(t, y): return y[1]
-    def effect_tip(t, y): return y[0] 
-    base_sol = solve_ivp(sa(base_net.f), t, base_state, jac = sa(base_net.jac), method='LSODA', events=[effect_tip, cause_tip]) # idk if the equation is actually stiff
-    tip_effect = base_net.get_tip_states(base_sol.y[:,-1])[0] # solve_ivp returns variable x time, unlike odeint which returns time x variable
-    tip_cause = base_net.get_tip_states(base_sol.y[:,-1])[1]
-    if base_net.get_number_tipped(base_sol.y[:,-1]) == 2:
-        effect_after_cause = base_sol.t_events[0][0] >= base_sol.t_events[1][0] # if effect tips after cause first tipped
+    # implementation TODO: get_par() needs to be amended to make copy
+    if derivative:
+        intervention_net.add_coupling(1, 0, cusp_derivative_coupling(strength=coupling_strength, 
+                                                            params=intervention_cause.get_par()))
     else:
-        effect_after_cause = 0
-    intervention_sol = solve_ivp(sa(intervention_net.f), t, intervention_state, jac=sa(intervention_net.jac), method='LSODA') # idk if the equation is actually stiff
-    tip_intervention = intervention_net.get_tip_states(intervention_sol.y[:,-1])[0]
+        intervention_net.add_coupling(1, 0, linear_coupling(strength=coupling_strength))
+
+    intervention_state = [-1, -1] if derivative else [-1, 1]
+    t = (0, 50000)
+    
+    intervention_sol = solve_ivp(intervention_net.f, t, intervention_state, jac=intervention_net.jac, method='LSODA', events=lambda t, x: x[0]) # idk if the equation is actually stiff
+    tip_intervention = len(intervention_sol.t_events[0]) > 0 # if the effect ever tipped, it gets registered
     # P(A') = P(B|A') + P(A and not B) 
     # This produces a fun correlation: because B tips faster than A, there is the correlation A tipped first -> B probably won't tip
     # at all (because we rolled a high/low threshold for B/A). Sort of an inverse inference about GMT (A tips first -> GMT lower than B threshold)
-    return tip_effect, tip_cause, effect_after_cause, tip_intervention
+    return tip_intervention
 
 def average_treatment_effect(effect:tipping_element, coupling_strength):
     """
@@ -110,63 +95,130 @@ def free_run(cause, effect, coupling_strength):
     """
     base_net = tipping_network()
     base_net.add_element(effect)
-    base_net.add_element(cause)
-    base_net.add_coupling(1, 0, linear_coupling(strength=coupling_strength, x_0=-1))
+    if coupling_strength:
+        base_net.add_element(cause)
+        base_net.add_coupling(1, 0, linear_coupling(strength=coupling_strength, x_0=-1))
 
-    t = np.linspace(0, 500000, 2)
+    t = (0, 50000) # maybe because this was 500k instead of 50k, this produced different results? Would be bad
 
-    base_state = [-1, -1]
-    def cause_tip(t, y): return y[1]
-    def effect_tip(t, y): return y[0] 
-    base_sol = solve_ivp(sa(base_net.f), t, base_state, jac = sa(base_net.jac), method='LSODA', events=[effect_tip, cause_tip]) # idk if the equation is actually stiff
-    tip_effect = base_net.get_tip_states(base_sol.y[:,-1])[0] # solve_ivp returns variable x time, unlike odeint which returns time x variable
+    base_state = [-1, -1] if coupling_strength else [-1]
+    base_sol = solve_ivp(base_net.f, t, base_state, jac = base_net.jac, method='LSODA', events=lambda t, x: x[0]) # idk if the equation is actually stiff
+    tip_effect = len(base_sol.t_events[0]) > 0 # solve_ivp returns variable x time, unlike odeint which returns time x variable
     return tip_effect
 
+def force_strict_mono(array):
+    """Marks all not strictly monotonically increasing elements in an array. Always keeps the first one. Does therefore tend to a long left tail 
+
+    Args:
+        array (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    monotonic = np.ones(array.shape, dtype = bool)
+    prev = -np.inf
+    for i in range(len(array)):
+        if array[i] <= prev:
+            monotonic[i] = False
+        else:
+            prev = array[i]
+    return monotonic
+
+def calibrate_interaction(cause:str, effect:str, derivative:bool):
+    n_intervention = np.zeros(n_interaction_strengths)
+    isolated_effect = 0
+    for temperature in [1.5, 2, 2.5]:
+        for params in input_file:
+            values = list(map(float, params)) # -1 is the mc_dir
+            if len(KEYS) != len(values):
+                raise KeyError("KEYS and LHS dont match!")
+            earth_params = dict(zip(KEYS, values))
+            cause_element = cusp(a=-1.0 / earth_params[f"{cause}_time"], b=1.0 / earth_params[f"{cause}_time"],
+                            c=(1.0 / earth_params[f"{cause}_time"]) * global_functions.CUSPc(0., earth_params[f"limits_{cause}"], temperature))
+            effect_element = cusp(a=-1.0 / earth_params[f"{effect}_time"], b=1.0 / earth_params[f"{effect}_time"],
+                            c=(1.0 / earth_params[f"{effect}_time"]) * global_functions.CUSPc(0., earth_params[f"limits_{effect}"], temperature))
+            isolated_effect += intervention_effect(cause_element, effect_element, 0, derivative) # for reasons, free run produces different effects than this coupling with 0 strength.........
+            for i, interaction_fac in enumerate(interaction_facs):
+                interaction_strength = interaction_fac / earth_params[f"{effect}_time"]
+                if derivative:
+                    interaction_strength *= earth_params[f"{cause}_time"]
+                tip_intervention = intervention_effect(cause_element, effect_element, interaction_strength, derivative)
+                n_intervention[i] += tip_intervention
+    
+    pf = n_intervention/isolated_effect
+    strictly_monotonic = force_strict_mono(pf)
+    df = pd.DataFrame({"pf": pf[strictly_monotonic], "interaction_fac": interaction_facs[strictly_monotonic]})
+    return df, f"{cause}_to_{effect}"
+
 n_interaction_strengths = 100
-n_effect = np.zeros(n_interaction_strengths)
-n_intervention = np.zeros(n_interaction_strengths)
-summary_ate = np.zeros(n_interaction_strengths)
-n_cause_first = np.zeros(n_interaction_strengths)
-n_effect_after_cause = np.zeros(n_interaction_strengths)
 interaction_facs = np.linspace(-1, 1., n_interaction_strengths)
 
-for params in input_file:
-    values = list(map(float, params)) # -1 is the mc_dir
-    params_dict = dict(zip(KEYS, values))
-    earth_params = EarthParams(**params_dict)
-    gis = cusp(a=-1.0 / earth_params.gis_time, b=1.0 / earth_params.gis_time,
-                    c=(1.0 / earth_params.gis_time) * global_functions.CUSPc(0., earth_params.limits_gis, temperature))
-    thc = cusp(a=-1.0 / earth_params.thc_time, b=1.0 / earth_params.thc_time,
-                     c=(1.0 / earth_params.thc_time) * global_functions.CUSPc(0., earth_params.limits_thc, temperature))
-    wais = cusp(a=-1.0 / earth_params.wais_time, b=1.0 / earth_params.wais_time,
-                    c=(1.0 / earth_params.wais_time) * global_functions.CUSPc(0., earth_params.limits_wais, temperature))
-    # amaz = cusp(a=-1.0 / earth_params.amaz_time, b=1.0 / earth_params.amaz_time,
-    #                 c=(1.0 / earth_params.amaz_time) * global_functions.CUSPc(0., earth_params.limits_amaz, temperature))
-    # nino = linear(a=-1 / earth_params.nino_time, c=(1.0 / earth_params.nino_time) * global_functions.CUSPc(0., earth_params.limits_nino, temperature), x_0=-1.0)
-    # assi = linear(a=-1 / earth_params.assi_time, c=(1.0 / earth_params.assi_time) * global_functions.CUSPc(0., earth_params.limits_assi, temperature), x_0=-1.0)
-    for i, interaction_fac in enumerate(interaction_facs):
-        interaction_strength = interaction_fac / earth_params.thc_time * earth_params.wais_time
-        tip_effect, tip_cause, effect_after_cause, tip_intervention = compare_with_intervention(wais, thc, interaction_strength)
-        n_effect[i] += tip_effect
-        n_intervention[i] += tip_intervention
-        # n_effect[i] += free_run(wais, gis, interaction_strength)
-        # summary_ate[i] += average_treatment_effect(gis, interaction_strength)
-        n_cause_first[i] += (effect_after_cause or tip_cause and not tip_effect)
-        n_effect_after_cause[i] += effect_after_cause
-# This falls apart due to the wonky question design: the temperature dependence of both leads to correlations that were excluded by the questionnaire
-# To wit: if you tell me that the WAIS melts before the GIS, I know that temperatures must be too low for GIS to melt
-n_trials = input_file.shape[0]
-# pf = ((n_effect_after_cause/n_cause_first)/(n_effect/n_trials))
-# plt.plot(interaction_facs, n_trials/n_effect, label="1/P(B)", color="tab:orange")
-# plt.axhline(1, color="tab:orange")
-pf = n_intervention/n_effect
-p_intervention =  n_intervention/n_trials
-odds = p_intervention/(1-p_intervention) # oddly enough, *inverse* odds -- odds against -- produce a linear relationship (until they hit 0)
-plt.plot(interaction_facs, 1/odds, label="Probability Factor")
-# fit, _ = curve_fit(linear_fct, interaction_facs, pf)
-# print(fit)
-# plt.plot(interaction_facs, linear_fct(interaction_facs, *fit))
-# plt.plot(interaction_facs, pf)
-plt.legend()
-plt.xlabel(r"Derivative coupling strength / $\tau_\mathrm{cause}$")
-plt.show()
+pairs = [
+        ["gis", "thc", True],
+         ["wais", "thc", True],
+         ["thc", "gis", False],
+         ["wais", "gis", False],
+         ["gis", "wais", False],
+         ["thc", "wais", False],
+         ["thc", "amaz", False],
+        #  # I think these are fine (if nino=1 can be considered equivalent to "tipped")
+         ["nino", "thc", False],
+         ["nino", "wais", False],
+         ["nino", "amaz", False],
+         ]
+results = {}
+
+for pair in pairs:
+    print(f"Currently calibrating: {pair[0]} to {pair[1]}")
+    df, name = calibrate_interaction(*pair)
+    results[name] = df
+
+full_df = pd.concat(results, axis=1)
+full_df.columns.names = ["component", "axis"]
+full_df.to_csv("interaction_calibration.csv")
+# TODO somehow, the pf of slightly positive interaction factors is smaller than one (???)
+# for params in input_file:
+#     values = list(map(float, params)) # -1 is the mc_dir
+#     earth_params = dict(zip(KEYS, values))
+#     gis = cusp(a=-1.0 / earth_params["gis_time"], b=1.0 / earth_params["gis_time"],
+#                     c=(1.0 / earth_params["gis_time"]) * global_functions.CUSPc(0., earth_params["limits_gis"], temperature))
+#     thc = cusp(a=-1.0 / earth_params["thc_time"], b=1.0 / earth_params["thc_time"],
+#                      c=(1.0 / earth_params["thc_time"]) * global_functions.CUSPc(0., earth_params["limits_thc"], temperature))
+#     wais = cusp(a=-1.0 / earth_params["wais_time"], b=1.0 / earth_params["wais_time"],
+#                     c=(1.0 / earth_params["wais_time"]) * global_functions.CUSPc(0., earth_params["limits_wais"], temperature))
+#     # amaz = cusp(a=-1.0 / earth_params.amaz_time, b=1.0 / earth_params.amaz_time,
+#     #                 c=(1.0 / earth_params.amaz_time) * global_functions.CUSPc(0., earth_params.limits_amaz, temperature))
+#     # nino = linear(a=-1 / earth_params.nino_time, c=(1.0 / earth_params.nino_time) * global_functions.CUSPc(0., earth_params.limits_nino, temperature), x_0=-1.0)
+#     # assi = linear(a=-1 / earth_params.assi_time, c=(1.0 / earth_params.assi_time) * global_functions.CUSPc(0., earth_params.limits_assi, temperature), x_0=-1.0)
+#     isolated_effect += free_run(wais, thc, 0)
+#     for i, interaction_fac in enumerate(interaction_facs):
+#         interaction_strength = interaction_fac / earth_params["thc_time"] * earth_params["wais_time"]
+#         tip_intervention = intervention_effect(wais, thc, interaction_strength)
+#         n_intervention[i] += tip_intervention
+#         # n_effect[i] += free_run(wais, gis, interaction_strength)
+# # This falls apart due to the wonky question design: the temperature dependence of both leads to correlations that were excluded by the questionnaire
+# # To wit: if you tell me that the WAIS melts before the GIS, I know that temperatures must be too low for GIS to melt
+# n_trials = input_file.shape[0]
+# # pf = ((n_effect_after_cause/n_cause_first)/(n_effect/n_trials))
+# # plt.plot(interaction_facs, n_trials/n_effect, label="1/P(B)", color="tab:orange")
+# # plt.axhline(1, color="tab:orange")
+# pf = n_intervention/isolated_effect
+# p_intervention =  n_intervention/n_trials
+# odds = p_intervention/(1-p_intervention) # oddly enough, *inverse* odds -- odds against -- produce a linear relationship (until they hit 0)
+# plt.plot(interaction_facs, pf, label="1/Probability Factor")
+# # because I fit the inverse max and min and directions are switched
+# # right_linear_edge = np.where(pf < 0.9*np.max(pf))[0][-1]
+# # left_linear_edge = np.where(pf > 1.1*np.min(pf))[0][0]
+# # linear_area = np.zeros(pf.shape, dtype=bool)
+# # linear_area[left_linear_edge:right_linear_edge] = 1
+
+# pf_array = np.linspace(0.2, 12, 500)
+# interaction_interpolation = np.interp(pf_array, pf[strictly_monotonic], interaction_facs[strictly_monotonic], left=np.nan, right=np.nan)
+# plt.plot(interaction_interpolation, pf_array, label="interpolation")
+# # assuming constant error in pf
+# # fit, _ = curve_fit(linear_fct, interaction_facs[linear_area], 1/pf[linear_area], sigma=1/pf[linear_area]**2)
+# # print(fit)
+# # plt.plot(interaction_facs[linear_area], linear_fct(interaction_facs[linear_area], *fit))
+# plt.legend()
+# plt.xlabel(r"Derivative coupling strength / $\tau_\mathrm{cause}$")
+# plt.show()

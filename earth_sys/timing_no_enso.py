@@ -7,26 +7,25 @@ sys.path.append('')
 import copy
 
 import numpy as np
-from scipy.integrate import odeint
+from scipy.integrate import solve_ivp
 from core.tipping_element import cusp
 from core.tipping_network import tipping_network
 from core.coupling import linear_coupling
 from core.evolve import evolve
 from earth_sys.functions_earth_system_no_enso import global_functions
-from earth_sys.earth_no_enso import EarthParams
 
 
 
 class timing():
 
-    def __init__(self, earth_params:EarthParams):
+    def __init__(self, earth_params: dict):
         #Timescales
         self.earth_params = earth_params
 
 
         #Compute conversion factor
-        self._real_timescale = self.earth_params.gis_time                   					 #value normed to GIS
-        self._timescale = self.earth_params.gis_time/self.earth_params.amaz_time                #value normed to GIS
+        self._real_timescale = self.earth_params['gis_time']                   					 #value normed to GIS
+        self._timescale = self.earth_params['gis_time']/self.earth_params['amaz_time']                #value normed to GIS
         self._tip_point_gis = 1.8  # most probable tipping point (see Robinson, 2012)    #value normed to GIS
         self._c_krit = np.sqrt(4 / 27)
         self._GMT_cal = 4.0                                        						 #normed temperature
@@ -42,12 +41,12 @@ class timing():
     """
     def timescales(self):
         new_params = copy.deepcopy(self.earth_params)
-        new_params.gis_time /= self.earth_params.amaz_time
-        new_params.thc_time /= self.earth_params.amaz_time
-        new_params.wais_time /= self.earth_params.amaz_time
-        new_params.nino_time /= self.earth_params.amaz_time
-        new_params.amaz_time /= self.earth_params.amaz_time
-        new_params.assi_time /= self.earth_params.assi_time
+        new_params['gis_time'] /= self.earth_params['amaz_time']
+        new_params['thc_time'] /= self.earth_params['amaz_time']
+        new_params['wais_time'] /= self.earth_params['amaz_time']
+        new_params['nino_time'] /= self.earth_params['amaz_time']
+        new_params['amaz_time'] /= self.earth_params['amaz_time']
+        # new_params['assi_time'] /= self.earth_params['assi_time']
         return new_params
 
 
@@ -63,7 +62,8 @@ class timing():
         timestep = 0.01
         t_end = 5000
         t_arr = np.arange(0, t_end, timestep)
-        sol = odeint( net.f , self._initial_state, t_arr, Dfun=net.jac )
+        sol = solve_ivp( net.f , (0, t_end), self._initial_state, t_eval=t_arr, jac=net.jac, method='LSODA')
+        sol = sol.y.T
         cusp_deq = sol[:, 0]
 
         # find point where state crosses threshold

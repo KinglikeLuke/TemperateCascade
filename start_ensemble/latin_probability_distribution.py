@@ -12,29 +12,29 @@ elements["limits_thc"]= [1.4, 8.0]
 elements["limits_wais"] = [1.0, 3.0]
 elements["limits_amaz"] = [2.0, 6.0]
 elements["limits_nino"] = [3.0, 6.0]
-elements["limits_assi"] = [1.3, 2.9]
+# elements["limits_assi"] = [1.3, 2.9]
 
 ###################################################
 # for now also rosser 2024. Generally they are the ad-hoc conversions from pf to interaction strength as in Wunderling 2019
 #TO GIS
-elements["pf_wais_to_gis"] = [0.1, 0.2]
+elements["pf_wais_to_gis"] = [1, 2]
 elements["pf_thc_to_gis"] = [0.1, 1.]
 # TO THC
-elements["pf_gis_to_thc"] = [1., 10.] # actual PF
-elements["pf_nino_to_thc"] = [0.1, 0.2]
-elements["pf_wais_to_thc"] = [0.3, 3] # actual PF 
-elements["pf_assi_to_thc"] = [0.1, 0.5]
-# TO WAIS"
-elements["pf_nino_to_wais"] = [0.1, 0.5]
-elements["pf_thc_to_wais" ]= [0.1, 0.15]
-elements["pf_gis_to_wais" ]= [0.1, 1.0]
+elements["pf_gis_to_thc"] = [1., 10.] 
+elements["pf_nino_to_thc"] = [0.5, 2]
+elements["pf_wais_to_thc"] = [0.6, 3] # reaching 0.3 is effectively impossible
+# elements["pf_assi_to_thc"] = [0.1, 0.5]
+# TO WAIS. Generally, WAIS tips so often in an "intermediate" temperature trajectory that any factor greater than 2 is unattainable
+elements["pf_nino_to_wais"] = [1, 5] # not happening
+elements["pf_thc_to_wais" ]= [1, 1.5]
+elements["pf_gis_to_wais" ]= [1, 2.0] # ultra sketch. I dont know how they imagine a tenfold increase between ice sheets (having very similar limiting temperature and all...)
 #TO AMAZ
-elements["pf_nino_to_amaz"] = [0.1, 1.0]
-elements["pf_thc_to_amaz" ]= [0.1, 0.4] 
+elements["pf_nino_to_amaz"] = [1, 10] # sketch
+elements["pf_thc_to_amaz" ]= [0.5, 4] # sketch
 #TO NINO
 elements["pf_thc_to_nino"] = [0.1, 0.2]
-# TO ASSI
-elements["pf_thc_to_assi"] = [0.5, 0.1]
+# # TO ASSI
+# elements["pf_thc_to_assi"] = [0.5, 0.1]
 
 # TIMINGS
 # Rosser 2024
@@ -43,11 +43,11 @@ elements["tau_thc"]=[15,300]
 elements["tau_wais"]=[500, 13000]
 elements["tau_nino"]=[25, 200]
 elements["tau_amaz"]=[50, 200]
-elements["tau_assi"]=[10,50]
+# elements["tau_assi"]=[10,50]
 """
 Latin hypercube sampling
 """
-points = np.array(lhs(len(elements.keys()), samples=100)) #give dimensions and sample size, here shown for a Latin hypercube
+points = np.array(lhs(len(elements.keys()), samples=200)) #give dimensions and sample size, here shown for a Latin hypercube
 
 #rescaling function from latin hypercube
 def latin_function(limits, rand):
