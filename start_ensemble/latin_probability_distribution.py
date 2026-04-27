@@ -2,8 +2,9 @@ from scipy.integrate import odeint
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import json
 sns.set(font_scale=1.25)
-from pyDOE import lhs #function name >>> lhs
+from pydoe import lhs #function name >>> lhs
 
 elements = {}
 #Tipping limits, see Schellnhuber, et al., 2016:
@@ -15,22 +16,22 @@ elements["limits_nino"] = [3.0, 6.0]
 # elements["limits_assi"] = [1.3, 2.9]
 
 ###################################################
-# for now also rosser 2024. Generally they are the ad-hoc conversions from pf to interaction strength as in Wunderling 2019
+# PFs as given in Kriegler, with sign changed depending on what newer GTPRs list
 #TO GIS
 elements["pf_wais_to_gis"] = [1, 2]
 elements["pf_thc_to_gis"] = [0.1, 1.]
 # TO THC
 elements["pf_gis_to_thc"] = [1., 10.] 
 elements["pf_nino_to_thc"] = [0.5, 2]
-elements["pf_wais_to_thc"] = [0.6, 3] # reaching 0.3 is effectively impossible
+elements["pf_wais_to_thc"] = [0.6, 1] # reaching 0.3 is effectively impossible. Also, weak, but stabilizing influence in GTPR2025
 # elements["pf_assi_to_thc"] = [0.1, 0.5]
 # TO WAIS. Generally, WAIS tips so often in an "intermediate" temperature trajectory that any factor greater than 2 is unattainable
-elements["pf_nino_to_wais"] = [1, 5] # not happening
+elements["pf_nino_to_wais"] = [1, 3] # TODO rerun with 5
 elements["pf_thc_to_wais" ]= [1, 1.5]
 elements["pf_gis_to_wais" ]= [1, 2.0] # ultra sketch. I dont know how they imagine a tenfold increase between ice sheets (having very similar limiting temperature and all...)
 #TO AMAZ
-elements["pf_nino_to_amaz"] = [1, 10] # sketch
-elements["pf_thc_to_amaz" ]= [0.5, 4] # sketch
+elements["pf_nino_to_amaz"] = [1, 10]
+elements["pf_thc_to_amaz" ]= [0.5, 1] # sketch. Probably stabilizing, regional variations
 #TO NINO
 elements["pf_thc_to_nino"] = [0.1, 0.2]
 # # TO ASSI
@@ -44,6 +45,12 @@ elements["tau_wais"]=[500, 13000]
 elements["tau_nino"]=[25, 200]
 elements["tau_amaz"]=[50, 200]
 # elements["tau_assi"]=[10,50]
+
+with open("limits.json", "w") as file:
+    json.dump(elements, file)
+# limit_filename = r"start_ensemble\limits.json"
+# with open(limit_filename, "r") as file:
+#     elements = json.load(file)
 """
 Latin hypercube sampling
 """

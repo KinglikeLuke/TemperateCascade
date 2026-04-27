@@ -1,4 +1,7 @@
 import sys
+import json
+from typing import Any
+
 # global imports
 import numpy as np
 from scipy.integrate import solve_ivp
@@ -7,10 +10,12 @@ from scipy.interpolate import interpolate
 from dataclasses import dataclass
 import pandas as pd
 import matplotlib.pyplot as plt
+from overshoot_trajectory import fit_parameters, overshoot_trajectory
+from pydoe import lhs
 
 # PyCascades imports
 from core.coupling import linear_coupling, cusp_derivative_coupling
-from core.tipping_element import cusp, linear, state_intervention, derivative_intervention, tipping_element
+from core.tipping_element import t_cusp, linear, state_intervention, derivative_intervention, tipping_element
 from core.tipping_network import tipping_network
 from earth_sys.functions_earth_system_no_enso import global_functions
 
@@ -23,7 +28,9 @@ KEYS = ['limits_gis','limits_thc','limits_wais','limits_amaz','limits_nino',
     'pf_nino_to_amaz', 'pf_thc_to_amaz',
     'gis_time','thc_time','wais_time','nino_time','amaz_time']
 input_file = np.loadtxt(r"start_ensemble\latin_prob_calibration.txt", delimiter=" ")
-temperature = 2
+limit_filename = r"start_ensemble\limits.json"
+with open(limit_filename, "r") as file:
+    LIMITS = json.load(file)
 
 def hyperbolic_fct(x, a, b, c):
     return a/(x+b) + c
@@ -52,9 +59,10 @@ def intervention_effect(cause:tipping_element, effect:tipping_element, coupling_
         intervention_net.add_coupling(1, 0, linear_coupling(strength=coupling_strength))
 
     intervention_state = [-1, -1] if derivative else [-1, 1]
-    t = (0, 50000)
-    
-    intervention_sol = solve_ivp(intervention_net.f, t, intervention_state, jac=intervention_net.jac, method='LSODA', events=lambda t, x: x[0]) # idk if the equation is actually stiff
+    t = (0, 10000)
+
+    # idk if the equation is actually stiff, but lsoda with jac is an order of magnitude faster than solve_ivp
+    intervention_sol = solve_ivp(intervention_net.f, t, intervention_state, jac=intervention_net.jac, method='LSODA', events=lambda t, x: x[0])
     tip_intervention = len(intervention_sol.t_events[0]) > 0 # if the effect ever tipped, it gets registered
     # P(A') = P(B|A') + P(A and not B) 
     # This produces a fun correlation: because B tips faster than A, there is the correlation A tipped first -> B probably won't tip
@@ -124,34 +132,71 @@ def force_strict_mono(array):
             prev = array[i]
     return monotonic
 
-def calibrate_interaction(cause:str, effect:str, derivative:bool):
-    n_intervention = np.zeros(n_interaction_strengths)
-    isolated_effect = 0
-    for temperature in [1.5, 2, 2.5]:
+def calibrate_interaction(cause:str, effect:str, derivative:bool, n_interaction_strengths:int=100):
+    limit = LIMITS[f"pf_{cause}_to_{effect}"]
+    interaction_limit = [0, 1]
+    pf = []
+    total_isolated_tips = 0
+    if limit[0] < 1:
+        interaction_limit[0] = -1
+        if limit[1] <= 1:
+            interaction_limit[1] = 0
+        else:
+            # if I have to scan both directions I need more granularity
+            n_interaction_strengths = 200
+
+    temperatures = []
+    T_0 = 1
+    lhc_distr = np.array(lhs(3, samples=20))
+    T_peaks = np.round(4 * lhc_distr[:, 0] + 2, 2)
+    T_lims = np.round(2 * lhc_distr[:, 1], 2)
+    t_convs = np.round(900 * lhc_distr[:, 2] + 100, 0)
+    for T_peak, T_lim, t_conv in zip(T_peaks, T_lims, t_convs):
+        R, mu_0, mu_1 = fit_parameters(T_0, T_peak, T_lim, t_conv)
+        # fun little lambda behavior again
+        temperatures.append(lambda t, tlim = T_lim, r=R, mu0=mu_0, mu1=mu_1: overshoot_trajectory(t, T_0, tlim, r, mu0, mu1))
+
+    for temperature in temperatures:
         for params in input_file:
-            values = list(map(float, params)) # -1 is the mc_dir
-            if len(KEYS) != len(values):
-                raise KeyError("KEYS and LHS dont match!")
-            earth_params = dict(zip(KEYS, values))
-            cause_element = cusp(a=-1.0 / earth_params[f"{cause}_time"], b=1.0 / earth_params[f"{cause}_time"],
-                            c=(1.0 / earth_params[f"{cause}_time"]) * global_functions.CUSPc(0., earth_params[f"limits_{cause}"], temperature))
-            effect_element = cusp(a=-1.0 / earth_params[f"{effect}_time"], b=1.0 / earth_params[f"{effect}_time"],
-                            c=(1.0 / earth_params[f"{effect}_time"]) * global_functions.CUSPc(0., earth_params[f"limits_{effect}"], temperature))
-            isolated_effect += intervention_effect(cause_element, effect_element, 0, derivative) # for reasons, free run produces different effects than this coupling with 0 strength.........
-            for i, interaction_fac in enumerate(interaction_facs):
+            earth_params, cause_element, effect_element = initialize_elements(cause, effect, temperature, params)
+            tip_isolated = intervention_effect(cause_element, effect_element, 0, derivative)
+            total_isolated_tips += tip_isolated
+
+    interaction_facs = np.linspace(*interaction_limit, n_interaction_strengths)
+    for i, interaction_fac in enumerate(interaction_facs):
+        n_intervention = 0
+        for temperature in temperatures:
+            for params in input_file:
+                earth_params, cause_element, effect_element = initialize_elements(cause, effect, temperature, params)
                 interaction_strength = interaction_fac / earth_params[f"{effect}_time"]
                 if derivative:
                     interaction_strength *= earth_params[f"{cause}_time"]
                 tip_intervention = intervention_effect(cause_element, effect_element, interaction_strength, derivative)
-                n_intervention[i] += tip_intervention
-    
-    pf = n_intervention/isolated_effect
+                n_intervention += tip_intervention
+        pf.append(n_intervention/total_isolated_tips)
+        if n_intervention/total_isolated_tips > limit[1]:
+            interaction_facs = interaction_facs[:i+1]
+            break
+    pf = np.array(pf)
     strictly_monotonic = force_strict_mono(pf)
     df = pd.DataFrame({"pf": pf[strictly_monotonic], "interaction_fac": interaction_facs[strictly_monotonic]})
-    return df, f"{cause}_to_{effect}"
+    return df, f"{pair[0]}_to_{pair[1]}"
 
-n_interaction_strengths = 100
-interaction_facs = np.linspace(-1, 1., n_interaction_strengths)
+
+def initialize_elements(cause: str, effect: str, temperature, params) -> tuple[
+    dict[Any, Any], t_cusp, t_cusp]:
+    values = list(map(float, params))  # -1 is the mc_dir
+
+    if len(KEYS) != len(values):
+        raise KeyError("KEYS and LHS dont match!")
+    earth_params = dict(zip(KEYS, values))
+    cause_element = t_cusp(a=-1.0 / earth_params[f"{cause}_time"], b=1.0 / earth_params[f"{cause}_time"],
+                         c=lambda t:(1.0 / earth_params[f"{cause}_time"]) * global_functions.CUSPc(0., earth_params[
+                             f"limits_{cause}"], temperature(t)))
+    effect_element = t_cusp(a=-1.0 / earth_params[f"{effect}_time"], b=1.0 / earth_params[f"{effect}_time"],
+                          c=lambda t: (1.0 / earth_params[f"{effect}_time"]) * global_functions.CUSPc(0., earth_params[
+                              f"limits_{effect}"], temperature(t)))
+    return earth_params, cause_element, effect_element
 
 pairs = [
         ["gis", "thc", True],

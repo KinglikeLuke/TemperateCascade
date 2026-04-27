@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.optimize import root, minimize_scalar
-from pydoe import lhs
+import time
 
 def overshoot_trajectory(t, T0, T_lim, R, mu0, mu1):
     y = R + mu0 * (T0 - T_lim)
@@ -89,25 +89,36 @@ def fit_parameters(T0, Tmax, T_lim, tconv, mu0=0.0015):
         method="hybr",
     )
     if not sol.success:
-        print(RuntimeWarning(sol.message))
-        return fit_parameters(T0, Tmax, T_lim, tconv+1, mu0=0.0015) #TODO sketchhhhh
+        raise RuntimeError(sol.message)
     R, mu1 = sol.x
     return R, mu0, mu1
 
+def timeit(f):
+    def wrap(*args, **kwargs):
+        t1 = time.time()
+        res = f(*args, **kwargs)
+        print(f"{f.__name__} ran in {time.time() - t1:.6f}s")
+        return res
+    return wrap
+
+@timeit
 def test_consistency():
+    from pydoe import lhs
     T0 = 1
-    n_tests = 100000
+    n_tests = 1000
     lhc_distr = np.array(lhs(3, samples=n_tests))
     Tmax = np.round(4*lhc_distr[:,0] + 2, 2)
     T_lim = np.round(2*lhc_distr[:,1], 2)
     tconv = np.round(900*lhc_distr[:,2] + 100, 0)
+    errors = 0
     for i in range(n_tests):
         try:
             fit_parameters(T0, Tmax[i], T_lim[i], tconv[i])
-        except:
+        except RuntimeError as error:
             print(i)
             print(Tmax[i], T_lim[i], tconv[i])
-    print("done")
+            errors += 1
+    print(f"done: {errors} errors")
 
 if __name__=="__main__":
     test_consistency()
