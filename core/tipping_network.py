@@ -1,4 +1,5 @@
 from networkx import DiGraph
+import networkx as nx
 import numpy as np
 
 
@@ -12,7 +13,13 @@ class tipping_network(DiGraph):
         super().add_node( ind, data = tipping_element )
         self._node[ind]['lambda_f'] = tipping_element.dxdt_diag()
         self._node[ind]['lambda_jac'] = tipping_element.jac_diag()
-        
+
+    def update_element(self, old_element_idx, new_element):
+        self.nodes[old_element_idx].clear()
+        self.nodes[old_element_idx].update(data = new_element)
+        self._node[old_element_idx]['lambda_f'] = new_element.dxdt_diag()
+        self._node[old_element_idx]['lambda_jac'] = new_element.jac_diag()
+
     def add_coupling( self, from_id, to_id, coupling):
         super().add_edge( from_id, to_id, data = coupling)
         self[from_id][to_id]['lambda_f'] = coupling.dxdt_cpl()

@@ -4,12 +4,13 @@ import sys
 import re
 import time
 
+from core.tipping_element import state_intervention
+
 sys.path.append('')
 
 # global imports
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import seaborn as sns
@@ -31,7 +32,7 @@ from core.evolve import evolve
 #private imports for earth system
 from earth_sys.timing_no_enso import timing
 from earth_sys.functions_earth_system_no_enso import global_functions
-from earth_sys.earth_no_enso import earth_network
+from earth_sys.earth_no_enso import earth_network, intervene_in_network
 
 from overshoot_trajectory import overshoot_trajectory, fit_parameters
 
@@ -41,13 +42,16 @@ from overshoot_trajectory import overshoot_trajectory, fit_parameters
 time_scale = True            # time scale of tipping is incorporated
 plus_minus_include = True    # from Kriegler, 2009: Unclear links; if False all unclear links are set to off state and only network "0-0" is computed
 ######################################################################
-duration = 50000 #actual real simulation years
+DURATION = 50000 #actual real simulation years
+N_STEPS = 1000
+T_0 = 1.0
+N_OVERSHOOTS = 400
 #Names to create the respective directories
 long_save_name = "../numerical_data/results"
 
 #######################GLOBAL VARIABLES##############################
 #drive coupling strength
-coupling_strengths = np.linspace(0.0, 1.0, 2, endpoint=True)
+#np.linspace(0.0, 1.0, 2, endpoint=True)
 #temperature input (forced with generated overshoot inputs)
 # temperature_trajs = np.loadtxt(r"temp_input\Tpeak_tconv_values\temp_input_values.txt", skiprows=1) #T_peak T_lim t_conv R mu_0 mu_1
 
@@ -66,6 +70,7 @@ KEYS = [
     'pf_thc_to_nino',
     'gis_time','thc_time','wais_time','nino_time','amaz_time'
 ]
+COMPONENTS = ["GIS", "AMOC", "WAIS", "Amazonas", "NINO", "total"] # tipping elements need to be gathered at the start
 ########################Declaration of variables from passed values#######################
 input_file = np.loadtxt(r"start_ensemble\latin_prob.txt", delimiter=" ")
 startdate = str(datetime.datetime.now().date())
@@ -105,62 +110,21 @@ def set_colormap(ax, data_length):
     else: ax_colormap.set_axis_off()  
 
 ################################# MAIN LOOP #################################
-def main():    
+def model_strengths():
     # Saving, folder creation only once first run goes through
-    folder = f"{long_save_name}/full_timeseries/{startdate}_1"
-    while os.path.isdir(f"{folder}"):
-        match = re.search(r"_(\d+)$", folder)
-        pos = match.span()
-        new_suffix = int(match.group(1)) + 1
-        folder = folder[:pos[0]] + "_" + str(new_suffix)
-    
-    # try:
-    #     os.stat("{}/network_{}_{}_{}".format(long_save_name, kk[0], kk[1], kk[2]))
-    # except:
-    #     os.mkdir("{}/network_{}_{}_{}".format(long_save_name, kk[0], kk[1], kk[2]))
+    coupling_strengths = [0, 1]
+    folder = prepare_folder("strengths")
 
-    # try:
-    #     os.stat("{}/{}_feedbacks/network_{}_{}_{}/{}".format(long_save_name, namefile, kk[0], kk[1], kk[2], str(mc_dir).zfill(4) ))
-    # except:
-    #     os.mkdir("{}/{}_feedbacks/network_{}_{}_{}/{}".format(long_save_name, namefile, kk[0], kk[1], kk[2], str(mc_dir).zfill(4) ))
-
-    #save starting conditions
-    # np.savetxt("{}/{}_feedbacks/network_{}_{}_{}/{}/empirical_values.txt".format(long_save_name, namefile, kk[0], kk[1], kk[2], str(mc_dir).zfill(4)), sys_var, delimiter=" ", fmt="%s")
-    
     index = pd.MultiIndex.from_arrays(
         [[], [], [], [], [], []],
         names=["lhc", "T_peak", "T_lim", "t_conv", "strength", "component"]
     )
     tipping_df = pd.DataFrame({}, index=index)
-    timing_df = pd.DataFrame({"tip_time": pd.Series(dtype="float64"),
-                              "nino_state": pd.Series(dtype="float64")}, index=index)
-    T_0 = 1.0
-    n_overshoots = 400
-    for i, sys_var in enumerate(tqdm(input_file)):
-        values = list(map(float, sys_var)) # -1 is the mc_dir
-        if len(KEYS) != len(values):
-            raise KeyError("KEYS and LHS seed dont match!")
-        earth_params_raw = dict(zip(KEYS, values))
+    timing_df = pd.DataFrame({"tip_time": pd.Series(dtype="float64")}, index=index)
 
-        # Time scale
-        if time_scale == True:
-            # print("compute calibration timescale")
-            # function call for absolute timing and time conversion
-            time_props = timing(earth_params_raw)
-            earth_params = time_props.timescales()
-            conv_fac_gis = time_props.conversion()
-        else:
-            #no time scales included
-            earth_params = earth_params_raw
-            earth_params["gis_time"], earth_params["amaz_time"], earth_params["nino_time"], earth_params["thc_time"], \
-                earth_params["wais_time"] = 1.0, 1.0, 1.0, 1.0, 1.0
-            conv_fac_gis = 1.0
-        
-        lhc_distr = np.array(lhs(3, samples=n_overshoots))
-        T_peaks = np.round(4*lhc_distr[:,0] + 2, 2)
-        # T_lims = np.round(2*lhc_distr[:,1], 2)
-        T_lims = np.round(2*lhc_distr[:,1], 2) # for plotting in the T_lim plane
-        t_convs = np.round(900*lhc_distr[:,2] + 100, 0)
+    for i, sys_var in enumerate(tqdm(input_file)):
+        conv_fac_gis, earth_params = prepare_earth_params(sys_var)
+        T_lims, T_peaks, t_convs = prepare_overshoots()
         state_output = []
         timing_output = []
         T_index = 0
@@ -174,103 +138,38 @@ def main():
                 t_convs = np.delete(t_convs, T_index)
                 continue
             T_index += 1
-            n_steps = 1000
-            output = np.zeros((len(coupling_strengths), 2 + 5, n_steps + 1)) # 2 + number of elements (difficult to get to at this stage)
-            tipping_record = np.zeros((len(coupling_strengths), 5))
-            nino_record = np.zeros((len(coupling_strengths), 5))
-            t1 = time.time()
+            state_record = np.zeros((len(coupling_strengths), 2 + 5, N_STEPS + 1)) # 2 + number of elements (difficult to get to at this stage)
+            timing_record = np.zeros((len(coupling_strengths), 5))
             for j, strength in enumerate(coupling_strengths):
-                # print("Coupling strength: {}".format(strength))
                 # How many points are to be calculated. odeint's precision is mostly independent of this, taking adaptive steps
-
                 # scale the temperature properly
                 forcing = lambda t: forcing_function(T_0, mu_0, mu_1, T_lim, R)(t*conv_fac_gis)
-                net = earth_network(earth_params, forcing, strength, 1, 1, 1) # here be ks
-                
-                # initialize state
+                net, node_dict = earth_network(earth_params, forcing, strength, 1, 1, 1) # here be ks
                 initial_state = -1*np.ones(len(net.nodes)) #initial state
-                # plotter.network(net)
 
-                #t_end given in years; also possible to use equilibrate method
-                t_end = duration/conv_fac_gis # simulation length in "real" years
-                t_span = (0, t_end)
-                t_eval = np.linspace(*t_span, n_steps + 1)
-                # global TODO: arguments of f and jac have been swapped
-                solution = solve_ivp(net.f, t_span, initial_state, t_eval=t_eval, jac=net.jac, method='LSODA', events = [lambda t, x, i=i: x[i] for i in range(len(net.nodes))])
-                sol = solution.y.T # solve_ivp transposes everything
-                t = solution.t
-                # Big Savefile - around 100 MB. Too large for a csv, a pkl will make much less hassle
-                tip_times = [t_event[0]*conv_fac_gis if len(t_event)>0 else np.nan for t_event in solution.t_events]
-                tip_nino = [y_event[-1][0] if len(y_event)>0 else np.nan for y_event in solution.y_events]
-                tipping_record[j] = tip_times
-                nino_record[j] = tip_nino
-                total_tipped = np.array([net.get_number_tipped(timeseries) for timeseries in sol])
+                sol, tip_times, total_tipped = simulate_network(net, initial_state, conv_fac_gis)
                 #saving structure: configuration x features x time
                 if np.any(np.isnan(sol)):
                     raise RuntimeError("NaN in solution")
-                output[j] = np.concatenate((conv_fac_gis*t[:,np.newaxis], sol, total_tipped[:,np.newaxis]), axis=1).T
+                state_record[j] = np.concatenate((sol, total_tipped[:,np.newaxis]), axis=1).T
+                timing_record[j] = tip_times
 
-            # print(f"Execution time: {time.time() - t1:.6f}s")
-            # ensemble_avg = np.mean(output, axis=0)
-            # ensemble_std = np.std(output, axis=0, ddof=1)
-            # std_output.append(ensemble_std)
-            state_output.append(output) # shape: temp_dim x 2 x components x time
-            timing_output.append([tipping_record, nino_record]) # shape: 2 x temp_dim x components
+            state_output.append(state_record) # shape: temp_dim x 2 x components x time
+            timing_output.append(timing_record) # shape: 2 x temp_dim x components
 
-        # characteristic = int(quad(forcing, 0, 1000/conv_fac_gis)[0]*conv_fac_gis) # renorm to account for different conv facs between parametrisations
-        output = [] # so it doesn't annoy me in debugger
+        state_record = [] # so it doesn't annoy me in debugger
         # structure: strength x features x time
-        data = np.round(np.array(state_output), 5)
-        t_grid = data[0,0,0]
-        data_no_time = data[:,:,1:,:]
-        components = ["GIS", "AMOC", "WAIS", "Amazonas", "NINO", "total"]
-        # Pain
-        # So the temperature properties cant be mixed, and everything has to be ordered in the same way as the data array
-        # Could also transpose the array, but the merging stays messy anyway
-        temperature_index = pd.MultiIndex.from_arrays([T_peaks, T_lims, t_convs], names=tipping_df.index.names[1:4])
-        temp_df = temperature_index.to_frame(index=False)
-        tipping_index = pd.MultiIndex.from_frame(
-            pd.DataFrame({tipping_df.index.names[0]: [i],})
-            .merge(temp_df, how="cross")
-            .merge(pd.DataFrame({tipping_df.index.names[-2]: coupling_strengths}), how="cross")
-            .merge(pd.DataFrame({tipping_df.index.names[-1]: components}), how="cross")
-        )
-        timing_index = tipping_index.copy().drop("total", level="component")
+        state_index = make_state_index(i, T_lims, T_peaks, t_convs, tipping_df, strengths = coupling_strengths, components = COMPONENTS)
 
-        # I want to see how many elements tipped after 100, 1000, 50000 years
-        medium_index = np.argmin(np.abs(t_grid-1000))
-        far_index = -1
-        new_tipping_df = pd.DataFrame(
-            {year: data for year, data in zip(np.round(t_grid[:medium_index+1], 0), data_no_time[:,:,:,:medium_index + 1].flatten())},
-            index=tipping_index,
-        )
-        new_tipping_df[t_grid[far_index]] = data_no_time[:, :, :, far_index].flatten()
-        tipping_df = pd.concat([tipping_df, new_tipping_df])
-        new_timing_df = pd.DataFrame(
-            {"tip_time": np.round(np.array(timing_output)[:,0].flatten(), 3),
-             "nino_state": np.round(np.array(timing_output)[:,1].flatten(), 3),},
-            index=timing_index,
-        )
-        new_timing_df.dropna(inplace=True)
-        timing_df = pd.concat([timing_df, new_timing_df])
+        tipping_df = state_results_to_df(state_index, state_output, tipping_df)
+        timing_df = timing_results_to_df(state_index, timing_output, timing_df)
+
         if not DEBUGGING_MODE: # to stop it from cluttering my workspace with folders
             if not os.path.isdir(folder): # if this is the first time we get here - whether the name fits is decided before the run
                 os.makedirs(folder)
             tipping_df.to_csv(f"{folder}/dataframe.csv")
             timing_df.to_csv(f"{folder}/timing_dataframe.csv")
-            # np.save(f"{path}_{characteristic}_total_tipped", data[:,-1])
-            # fig, ax = plt.subplots()
-            # set_colormap(ax, data.shape[0])
-            # for temperature_traj, data_strength in enumerate(data):
-            #     ax.plot(t_grid, data_strength[-1], label=f"Interactions: 0.{temperature_traj}")
-            # ax.set_title(f"Temperature properties: {key}")
-            # ax.set_xlabel("Time [yr]")
-            # ax.set_ylabel("Tipped elements")
-            # # ax.legend(loc='best')  # , ncol=5)
-            # fig.savefig(f"{path}.pdf")
-            # #plt.show()
-            # plt.clf()
-            # plt.close()
+
     lhs_df = pd.DataFrame(input_file, columns=KEYS)
     lhs_df.to_csv(f"{folder}/tipping_properties.csv")
 
@@ -309,26 +208,205 @@ def main():
 
     print("Finish")
 
-# def rename_characteristic():
-#     filenames = glob.glob(f"results/no_feedbacks/network_1.0_1.0_1.0/*.npy")
-#     temp_df = pd.DataFrame(temperature_trajs, columns=["Tpeak", "Tlim", "tconv", "R", "mu0", "mu1"])
-#     temp_idx_df = temp_df.set_index(["Tlim", "Tpeak", "tconv"])
-#     for filename in filenames:
-#         m = re.search(
-#             r'Tlim(?P<Tlim>[0-9]+(?:\.[0-9]+)?)_'
-#             r'Tpeak(?P<Tpeak>[0-9]+(?:\.[0-9]+)?)_'
-#             r'tconv(?P<tconv>[0-9]+(?:\.[0-9]+)?)',
-#             filename
-#         )
-#         vals = {k: float(v) for k, v in m.groupdict().items()}
-#         row = temp_idx_df.loc[tuple(vals[k] for k in temp_idx_df.index.names)]
-#         forcing = forcing_function(1.0, row["mu0"], row["mu1"], vals["Tlim"], row["R"])
-#         characteristic = np.round((quad(forcing, 0, 500)[0]), 2)
-#         new_filename = re.sub(r'([0-9]+\.[0-9]+)(?!.*[0-9]+\.[0-9]+)', str(characteristic), filename)
-#
-#         os.rename(filename, new_filename)
+def model_interventions():
+    # Saving, folder creation only once first run goes through
+    interventions = COMPONENTS[:4]
+    intervention_states = [-1, 1]
+    folder = prepare_folder("intervention")
+
+    index = pd.MultiIndex.from_arrays(
+        [[], [], [], [], [], [], []],
+        names=["lhc", "T_peak", "T_lim", "t_conv", "intervention", "state", "component"]
+    )
+    tipping_df = pd.DataFrame({}, index=index)
+    timing_df = pd.DataFrame({"tip_time": pd.Series(dtype="float64")}, index=index)
+
+    for i, sys_var in enumerate(tqdm(input_file)):
+        conv_fac_gis, earth_params = prepare_earth_params(sys_var)
+
+        T_lims, T_peaks, t_convs = prepare_overshoots()
+        state_output = []
+        timing_output = []
+        T_index = 0
+        for T_peak, T_lim, t_conv in zip(T_peaks, T_lims, t_convs):
+            try:
+                R, mu_0, mu_1 = fit_parameters(T_0, T_peak, T_lim, t_conv)
+            except RuntimeError as error:
+                print(f"{error}: Parameters T_peak:{T_peak}, T_lim:{T_lim}, t_conv:{t_conv}")
+                T_peaks = np.delete(T_peaks, T_index)
+                T_lims = np.delete(T_lims, T_index)
+                t_convs = np.delete(t_convs, T_index)
+                continue
+            T_index += 1
+            state_record = []
+            timing_record = []
+            for j, intervention_element in enumerate(interventions):
+                state_intervention_record = []
+                state_timing_record = []
+                for k, intervention_state in enumerate(intervention_states):
+                    # How many points are to be calculated. odeint's precision is mostly independent of this, taking adaptive steps
+                    # scale the temperature properly
+                    forcing = lambda t: forcing_function(T_0, mu_0, mu_1, T_lim, R)(t*conv_fac_gis)
+                    net, node_dict = earth_network(earth_params, forcing, strength=1, kk0=1, kk1=1, kk2=1)
+                    # TODO TEST!!!
+                    net, initial_state = intervene_in_network(net, intervention_element, intervention_state, node_dict)
+
+                    sol, tip_times, total_tipped = simulate_network(net, initial_state, conv_fac_gis)
+                    #saving structure: configuration x features x time
+                    if np.any(np.isnan(sol)):
+                        raise RuntimeError("NaN in solution")
+                    # TODO TEST!!!
+                    state_intervention_record.append(np.concatenate((sol, total_tipped[:,np.newaxis]), axis=1).T)
+                    state_timing_record.append(tip_times)
+                state_record.append(state_intervention_record)
+                timing_record.append(state_timing_record)
+
+            state_output.append(state_record) # shape: temp_dim x interventions x components x time
+            timing_output.append(timing_record) # shape: temp_dim x interventions x components
+
+        state_record = [] # so it doesn't annoy me in debugger
+        # structure: strength x features x time
+        state_index = make_state_index(i, T_lims, T_peaks, t_convs, tipping_df, interventions = interventions,
+                                       intervention_states = intervention_states, components = COMPONENTS)
+
+        tipping_df = state_results_to_df(state_index, state_output, tipping_df) # these modify the df in place
+        timing_df = timing_results_to_df(state_index, timing_output, timing_df)
+
+        if not DEBUGGING_MODE: # to stop it from cluttering my workspace with folders
+            if not os.path.isdir(folder): # if this is the first time we get here - whether the name fits is decided before the run
+                os.makedirs(folder)
+            tipping_df.to_csv(f"{folder}/dataframe.csv")
+            timing_df.to_csv(f"{folder}/timing_dataframe.csv")
+
+    lhs_df = pd.DataFrame(input_file, columns=KEYS)
+    lhs_df.to_csv(f"{folder}/tipping_properties.csv")
+
+def simulate_network(net, initial_state, conv_fac_gis):
+    # t_end given in years; also possible to use equilibrate method
+    t_end = DURATION / conv_fac_gis  # simulation length in "real" years
+    t_span = (0, t_end)
+    t_eval = np.linspace(*t_span, N_STEPS + 1)
+    # global TODO: arguments of f and jac have been swapped
+    solution = solve_ivp(net.f, t_span, initial_state, t_eval=t_eval, jac=net.jac, method='LSODA',
+                         events=[lambda t, x, i=i: x[i] for i in range(len(net.nodes))])
+    sol = solution.y.T  # solve_ivp transposes everything
+    t = solution.t
+    # Big Savefile - around 100 MB. Too large for a csv, a pkl will make much less hassle
+    tip_times = [t_event[0] * conv_fac_gis if len(t_event) > 0 else np.nan for t_event in solution.t_events]
+    # tip_nino = [y_event[-1][0] if len(y_event)>0 else np.nan for y_event in solution.y_events]
+    total_tipped = np.array([net.get_number_tipped(timeseries) for timeseries in sol])
+    return sol, tip_times, total_tipped
+
+
+def prepare_overshoots():
+    lhc_distr = np.array(lhs(3, samples=N_OVERSHOOTS))
+    T_peaks = np.round(4 * lhc_distr[:, 0] + 2, 2)
+    # T_lims = np.round(2*lhc_distr[:,1], 2)
+    T_lims = np.round(2 * lhc_distr[:, 1], 2)  # for plotting in the T_lim plane
+    t_convs = np.round(900 * lhc_distr[:, 2] + 100, 0)
+    return T_lims, T_peaks, t_convs
+
+
+def prepare_earth_params(sys_var):
+    values = list(map(float, sys_var))  # -1 is the mc_dir
+    if len(KEYS) != len(values):
+        raise KeyError("KEYS and LHS seed dont match!")
+    earth_params_raw = dict(zip(KEYS, values))
+
+    # Time scale
+    if time_scale == True:
+        # print("compute calibration timescale")
+        # function call for absolute timing and time conversion
+        time_props = timing(earth_params_raw)
+        earth_params = time_props.timescales()
+        conv_fac_gis = time_props.conversion()
+    else:
+        # no time scales included
+        earth_params = earth_params_raw
+        earth_params["gis_time"], earth_params["amaz_time"], earth_params["nino_time"], earth_params["thc_time"], \
+            earth_params["wais_time"] = 1.0, 1.0, 1.0, 1.0, 1.0
+        conv_fac_gis = 1.0
+    return conv_fac_gis, earth_params
+
+
+def prepare_folder(experiment_name):
+    folder = f"{long_save_name}/{experiment_name}/{startdate}_1"
+    while os.path.isdir(f"{folder}"):
+        match = re.search(r"_(\d+)$", folder)
+        pos = match.span()
+        new_suffix = int(match.group(1)) + 1
+        folder = folder[:pos[0]] + "_" + str(new_suffix)
+    return folder
+
+
+def timing_results_to_df(state_index, timing_output, timing_df):
+    timing_index = state_index.copy().drop("total", level="components")
+    new_timing_df = pd.DataFrame(
+        {"tip_time": np.round(np.array(timing_output).flatten(), 3)},
+        index=timing_index,
+    )
+    new_timing_df.dropna(inplace=True)
+    timing_df = pd.concat([timing_df, new_timing_df])
+    return timing_df
+
+
+def state_results_to_df(state_index, state_output, tipping_df):
+    data = np.round(np.array(state_output), 5)
+    t_grid = np.linspace(0, DURATION, N_STEPS + 1)
+    # Pain
+    # So the temperature properties cant be mixed, and everything has to be ordered in the same way as the data array
+    # Could also transpose the array, but the merging stays messy anyway
+    # I want to see how many elements tipped after 100, 1000, 50000 years
+    medium_index = np.argmin(np.abs(t_grid - 1000))
+    far_index = -1
+    new_tipping_df = pd.DataFrame(
+        {year: states for year, states in zip(np.round(t_grid[[medium_index, far_index]], 0),
+                                          data[..., [medium_index, far_index]].flatten())},
+        index=state_index,
+    )
+    tipping_df = pd.concat([tipping_df, new_tipping_df])
+    return tipping_df
+
+def make_state_index(i, T_lims, T_peaks,  t_convs, tipping_df, **index_levels):
+    """
+    index_levels: arbitrary keyword arguments where each key is an index level name
+                  and each value is the list/array of components for that level.
+                  e.g. coupling_strength=coupling_strengths, component=["GIS", "AMOC", ...]
+    """
+    temperature_index = pd.MultiIndex.from_arrays([T_peaks, T_lims, t_convs], names=tipping_df.index.names[1:4])
+    temp_df = temperature_index.to_frame(index=False)
+
+    merged = (
+        pd.DataFrame({tipping_df.index.names[0]: [i]})
+        .merge(temp_df, how="cross")
+    )
+    for level_name, level_values in index_levels.items():
+        merged = merged.merge(pd.DataFrame({level_name: level_values}), how="cross")
+
+    state_index = pd.MultiIndex.from_frame(merged)
+    return state_index
+
+def rename_characteristic():
+    filenames = glob.glob(f"results/no_feedbacks/network_1.0_1.0_1.0/*.npy")
+    temp_df = pd.DataFrame(temperature_trajs, columns=["Tpeak", "Tlim", "tconv", "R", "mu0", "mu1"])
+    temp_idx_df = temp_df.set_index(["Tlim", "Tpeak", "tconv"])
+    for filename in filenames:
+        m = re.search(
+            r'Tlim(?P<Tlim>[0-9]+(?:\.[0-9]+)?)_'
+            r'Tpeak(?P<Tpeak>[0-9]+(?:\.[0-9]+)?)_'
+            r'tconv(?P<tconv>[0-9]+(?:\.[0-9]+)?)',
+            filename
+        )
+        vals = {k: float(v) for k, v in m.groupdict().items()}
+        row = temp_idx_df.loc[tuple(vals[k] for k in temp_idx_df.index.names)]
+        forcing = forcing_function(1.0, row["mu0"], row["mu1"], vals["Tlim"], row["R"])
+        characteristic = np.round((quad(forcing, 0, 500)[0]), 2)
+        new_filename = re.sub(r'([0-9]+\.[0-9]+)(?!.*[0-9]+\.[0-9]+)', str(characteristic), filename)
+
+        os.rename(filename, new_filename)
+
 DEBUGGING_MODE = sys.monitoring.get_tool(sys.monitoring.DEBUGGER_ID) is not None
-main()
+model_interventions()
 # Good lord
 # The original Code steps in 0.1 (absolute? idk) year steps through the solver (because the stepsize is far greater than the calibrated(?) t_end)
 # However, it takes its Temperature curve as if it made 1 year steps (every step a new year)

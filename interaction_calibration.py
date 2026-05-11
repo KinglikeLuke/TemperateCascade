@@ -49,7 +49,10 @@ def sa(f):
 def intervention_effect(cause:tipping_element, effect:tipping_element, coupling_strength, derivative):
     intervention_net = tipping_network()
     intervention_net.add_element(effect)
-    intervention_cause = derivative_intervention(**cause.get_par()) if derivative else state_intervention()
+    if derivative:
+        intervention_cause = derivative_intervention(**cause.get_par())
+    else:
+        intervention_cause = state_intervention()
     intervention_net.add_element(intervention_cause)
     # implementation TODO: get_par() needs to be amended to make copy
     if derivative:

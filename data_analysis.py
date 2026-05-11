@@ -30,7 +30,7 @@ plt.rcParams.update({
     "font.serif": ["Computer Modern"],# Match default LaTeX font
     "font.sans-serif": ["Latin Modern"],
     "axes.labelsize": 14,             # Font size for axis labels
-    "font.size": 14,                  # General font size
+    "font.size": 13,                  # General font size
     "legend.fontsize": 11,             # Legend font size
     "xtick.labelsize": 11,
     "ytick.labelsize": 11,
@@ -38,7 +38,7 @@ plt.rcParams.update({
     "xtick.direction": "out",
     'figure.constrained_layout.use': True,
     "legend.frameon":    False,
-    "figure.dpi": 150
+    "figure.dpi": 300
 })
 temp_df = pd.read_csv(r"temp_input\Tpeak_tconv_values\temp_input_values.txt", dtype=float, delimiter=" ", comment="#")
 temp_idx_df = temp_df.set_index(["T_lim", "T_peak", "t_conv"])
@@ -154,10 +154,12 @@ def imshow_grid(
         axes[0].set_yticks(y_ticks)
         axes[0].set_yticklabels(y_ticklabels)
 
-    cbar = fig.colorbar(im, ax=axes[:len(axes)//2], shrink=0.8)
+    cbar = fig.colorbar(im, ax=axes[:len(axes)//2])
+    y_ticks = [*np.arange(0.2, 0.5, 0.2), 0.5] # TODO idk
+    cbar.ax.set_yticks(y_ticks, y_ticks)
     #cbar.ax.set_yticks([0, 0.5, 1, np.round(vmax, 1)[0]], [0, 0.5, 1, np.round(vmax, 1)[0]])
     if cbar_label:
-        cbar.set_label(cbar_label)
+        cbar.set_label(cbar_label, fontsize="small")
 
     return fig, axes
 
@@ -200,7 +202,7 @@ def prepare_impact_plot(impact_df, T_lim=None):
         "matrices": matrices,
         "titles": titles,
         "x_ticks": x_ticks,
-        "x_ticklabels": tconv.round(0)[x_ticks],
+        "x_ticklabels": np.int16(tconv.round(0))[x_ticks],
         "y_ticks": y_ticks,
         "y_ticklabels": Tpeak.round(1)[y_ticks],
         "vmin": impact_df.min(),
@@ -487,7 +489,7 @@ def state_plot(state_df:pd.DataFrame):
     cfg_wais = prepare_impact_plot(impact_dfs["WAIS"])
     cfg_amoc = prepare_impact_plot(impact_dfs["AMOC"])
     cfg_amazonas = prepare_impact_plot(impact_dfs["Amazonas"])
-    cfg_total["titles"] = [f"{chr(char)}" for char in range(97, 103)]  # Look ma, I took a C course!
+    cfg_total["titles"] = [f"{chr(97+i)}) {cfg_total["titles"][i]}" for i in range(3)]  # Look ma, I took a C course!
     fig, axes = imshow_grid(
         **cfg_total,
         nrows=2,
@@ -514,17 +516,16 @@ def state_plot(state_df:pd.DataFrame):
                    cmap=diverging_map, norm=divnorm)
     im = axes[5].imshow(cfg_gis["matrices"][element_tlim_index], origin="lower", aspect="auto",
                         cmap=diverging_map, norm=divnorm)
-    # axes[3].set_title(f"{cfg_impact["titles"][element_tlim_index]}, AMOC",loc='left', fontsize='small')
-    # axes[4].set_title(f"{cfg_impact["titles"][element_tlim_index]}, AR",loc='left', fontsize='small')
-    # axes[5].set_title(f"{cfg_impact["titles"][element_tlim_index]}, GIS",loc='left', fontsize='small')
-
+    cfg_total["titles"].append(r"d) AMOC")
+    cfg_total["titles"].append(r"e) AR")
+    cfg_total["titles"].append(r"f) GIS")
     for ax, title in zip(axes, cfg_total["titles"]):
         ax.set_title(title, loc='left', fontsize='medium')
 
     colorbar = fig.colorbar(im, ax=axes[3:])
-    colorbar.set_label("Impact on element")
+    colorbar.set_label("Impact on element", fontsize="small")
     colorbar.ax.set_ylim(vmin - 0.03, vmax)  # cant go above b/c colorspace ends there
-    y_ticks = [np.round(vmin, 1), *np.arange(0, 1.0, 0.5)]
+    y_ticks = [np.round(vmin, 1), *np.arange(0, 0.6, 0.5), np.round(vmax, 1)]
     colorbar.ax.set_yticks(y_ticks, y_ticks)  # get_yticks is useless as ever, so this needs to be hardcoded
     overshoot_ax = axes[-1].inset_axes((0.49, 0.15, 0.5, 0.5))
     overshoot_ax.patch.set_alpha(0.0)

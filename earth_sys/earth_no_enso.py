@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 # private imports from sys.path
 from core.coupling import linear_coupling, cusp_derivative_coupling
-from core.tipping_element import t_cusp, linear
+from core.tipping_element import t_cusp, linear, derivative_intervention, state_intervention
 from core.tipping_network import tipping_network
 from earth_sys.functions_earth_system_no_enso import global_functions
 
@@ -40,7 +40,16 @@ def pf_to_interaction(earth_params, name):
     """
     columns = calibration_df[name[3:]].dropna()
     return np.interp(earth_params[name], columns["pf"], columns["interaction_fac"])
-    
+
+def intervene_in_network(net, intervention_element, intervention_state, node_dict):
+    initial_state = -1 * np.ones(len(net.nodes))  # initial state
+    if intervention_element in ["wais", "gis"] and intervention_state == 1:
+        intervention_node = derivative_intervention(**net.nodes[node_dict[intervention_element]]['data'].get_par())
+    else:
+        intervention_node = state_intervention()
+        initial_state[node_dict[intervention_element]] = intervention_state
+    net.update_element(node_dict[intervention_element], intervention_node)
+    return net, initial_state
 
 def earth_network(earth_params: dict, temperature, strength, kk0, kk1, kk2):
     """Create the Earth system tipping network.
@@ -70,7 +79,7 @@ def earth_network(earth_params: dict, temperature, strength, kk0, kk1, kk2):
     net.add_element(amaz)
     net.add_element(nino)
     # net.add_element(assi)
-
+    node_dict = {"GIS":0, "AMOC":1, "WAIS":2, "Amazonas":3, "NINO":4}
     ######################################Set edges to active state#####################################
     net.add_coupling(1, 0, linear_coupling(strength=-(1.0 / earth_params['gis_time']) * strength * pf_to_interaction(earth_params, 'pf_thc_to_gis'), x_0=-1))
     net.add_coupling(2, 0, linear_coupling(strength=(1.0 / earth_params['gis_time']) * strength *pf_to_interaction(earth_params, 'pf_wais_to_gis'), x_0=-1))
@@ -99,4 +108,4 @@ def earth_network(earth_params: dict, temperature, strength, kk0, kk1, kk2):
     
     # net.add_coupling(1, 5, linear_coupling(strength=-(1.0 / earth_params.assi_time) * strength * earth_params.pf_thc_to_assi, x_0=-1))
 
-    return net
+    return net, node_dict
