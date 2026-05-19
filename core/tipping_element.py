@@ -116,9 +116,9 @@ class linear(tipping_element):
     def tip_state(self):
         return lambda x: x > 0
 
-class state_intervention(tipping_element):
+class state_intervention(cusp):
     def __init__(self):
-        super().__init__()
+        super().__init__(0,0,0)
 
     def tip_state(self):
         return lambda x: x > 0 

@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.optimize import root, minimize_scalar
+from matplotlib import pyplot as plt
 import time
 
 def overshoot_trajectory(t, T0, T_lim, R, mu0, mu1):
@@ -35,7 +36,7 @@ def _residuals(params, T0, T_lim, mu0, Tmax, tconv, eps):
 
     return [r1, r2]
 
-def _initial_guess(T0, Tmax, T_lim, tconv, mu0=0.0015):
+def _initial_guess(T0, Tmax, T_lim, tconv, mu0=0.0015, delta=1e-2):
     """Match slope to slope to slope to peak, match exponential to position of peak. See chatgpt
 
     Args:
@@ -59,6 +60,7 @@ def _initial_guess(T0, Tmax, T_lim, tconv, mu0=0.0015):
     # mu1 guess
     mu1 = (1 - mu0 * t_peak) / (t_peak ** 2)
     mu1 = max(mu1, 1e-6)
+
     return R, mu1
 
 def fit_parameters(T0, Tmax, T_lim, tconv, mu0=0.0015):
@@ -79,9 +81,10 @@ def fit_parameters(T0, Tmax, T_lim, tconv, mu0=0.0015):
     Returns:
         _type_: _description_
     """
-
-    eps = 1e-2
-    x0 = _initial_guess(T0, Tmax, T_lim, tconv, mu0=mu0)
+    eps = 1e-3
+    if np.isclose(Tmax, T_lim, atol = eps):
+        Tmax += 10*eps
+    x0 = _initial_guess(T0, Tmax, T_lim, tconv, mu0=mu0, delta=eps)
     sol = root(
         _residuals,
         x0=x0,
@@ -121,4 +124,7 @@ def test_consistency():
     print(f"done: {errors} errors")
 
 if __name__=="__main__":
-    test_consistency()
+    t = np.linspace(0, 2100)
+    plt.plot(t, overshoot_trajectory(t, 1, 2, *fit_parameters(1, 2, 2, 500)))
+    plt.show()
+    # test_consistency()

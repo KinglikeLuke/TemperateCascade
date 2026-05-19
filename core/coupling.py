@@ -65,9 +65,9 @@ class cusp_derivative_coupling(coupling):
         """Constructor"""
         coupling.__init__(self)
         self._strength = strength
-        if isinstance(params['c'], float):
+        if not callable(params['c']):
             c = params['c']     # Python pointer adventures
-            params['c'] = lambda t: c
+            params['c'] = lambda t, c_in = c: c_in
         self._par = params
         
     def dxdt_cpl(self):

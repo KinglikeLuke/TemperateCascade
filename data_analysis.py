@@ -2,9 +2,12 @@ import glob
 import os
 import re
 import itertools
+from typing import Any
 
 import numpy as np
 import pandas as pd
+from numpy import dtype, ndarray
+from pandas import DataFrame
 from scipy.integrate import quad
 from scipy.spatial import cKDTree
 from sklearn import linear_model, ensemble
@@ -103,6 +106,52 @@ def forcing_function(T_0, mu_0, mu_1, T_lim, R):
     f = lambda t: (T_0 + y*t - (1 - np.exp(-(mu_0+mu_1*t)*t))*(y*t - (T_lim - T_0)))
     return f
 
+def calculate_clean_ticks(vmin, vmax, target_ticks=6):
+    """Calculate clean tick positions between vmin and vmax."""
+    data_range = vmax - vmin
+
+    # Candidate step sizes (clean numbers)
+    step_candidates = [0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+
+    # Scale candidates to appropriate magnitude
+    magnitude = 10 ** np.floor(np.log10(data_range))
+    scaled_candidates = [s * magnitude for s in step_candidates]
+    scaled_candidates.extend([s * magnitude / 10 for s in step_candidates])
+    scaled_candidates.extend([s * magnitude * 10 for s in step_candidates])
+
+    # Find step size that gives closest to target number of ticks
+    best_step = None
+    best_diff = float('inf')
+
+    for step in scaled_candidates:
+        first_tick = np.ceil(vmin / step) * step
+        last_tick = np.floor(vmax / step) * step
+        n_ticks = int(np.round((last_tick - first_tick) / step)) + 1
+
+        if 3 <= n_ticks <= 5:
+            diff = abs(n_ticks - target_ticks)
+            if diff < best_diff:
+                best_diff = diff
+                best_step = step
+
+    # Fallback if no suitable step found
+    if best_step is None:
+        best_step = data_range / (target_ticks - 1)
+
+    # Generate interior ticks
+    first_tick = np.ceil(vmin / best_step) * best_step
+    last_tick = np.floor(vmax / best_step) * best_step
+    interior_ticks = np.arange(first_tick, last_tick + best_step / 2, best_step)
+
+    # Always include exact min and max
+    if abs(interior_ticks[0] - vmin) > best_step / 4:
+        all_ticks = np.concatenate([[vmin], interior_ticks])
+    if abs(interior_ticks[-1] - vmax) > best_step / 4:
+        all_ticks = np.concatenate([interior_ticks, [vmax]])
+    all_ticks = np.round(np.unique(all_ticks), 2)
+
+    return all_ticks
+
 def imshow_grid(
     matrices,
     titles,
@@ -116,8 +165,7 @@ def imshow_grid(
     xlabel=None,
     ylabel=None,
     cbar_label=None,
-    vmin=None,
-    vmax=None,):
+    cbar_axis=None):
     fig, axes = plt.subplots(
         nrows=nrows,
         ncols=ncols,
@@ -125,18 +173,23 @@ def imshow_grid(
         sharex=True,
         sharey=True,
     )
-
+    vmin = min(np.min(matrix) for matrix in matrices[:nrows * ncols])
+    vmax = max(np.max(matrix) for matrix in matrices[:nrows * ncols])
     axes = [axes] if isinstance(axes, Axes) else list(axes.flat)
 
+    diverging_map = "managua"  # shiftedColorMap(plt.cm.coolwarm, 0, 1 - vmax / (vmax + abs(vmin)), 1)
+    limit = max(np.abs(vmin), np.abs(vmax))
+    divnorm = colors.TwoSlopeNorm(vcenter=0, vmin=-limit, vmax=limit)
     for ax, mat, title in zip(axes, matrices, titles):
         im = ax.imshow(
             mat,
             origin="lower",
             aspect="auto",
-            vmin=vmin,
-            vmax=vmax, #TODO ugly hack
-            cmap="inferno",
-        #    interpolation="bilinear"
+            # vmin=vmin,
+            # vmax=vmax, #TODO ugly hack
+            cmap=diverging_map,
+            norm=divnorm,
+            #    interpolation="bilinear"
         )
         # ax.set_title(title, loc='left', fontsize='small')
 
@@ -153,15 +206,16 @@ def imshow_grid(
     if y_ticks is not None:
         axes[0].set_yticks(y_ticks)
         axes[0].set_yticklabels(y_ticklabels)
+    cbar = fig.colorbar(im, ax=axes[:cbar_axis] if cbar_axis else axes[:len(axes) // 2])
 
-    cbar = fig.colorbar(im, ax=axes[:len(axes)//2])
-    y_ticks = [*np.arange(0.2, 0.5, 0.2), 0.5] # TODO idk
-    cbar.ax.set_yticks(y_ticks, y_ticks)
-    #cbar.ax.set_yticks([0, 0.5, 1, np.round(vmax, 1)[0]], [0, 0.5, 1, np.round(vmax, 1)[0]])
+    y_ticks = calculate_clean_ticks(vmin, vmax) # AI developed
+    cbar.ax.set_yticks(y_ticks)
+    cbar.ax.set_ylim(vmin, vmax)
+    cbar.ax.set_yticklabels([f'{tick:.2g}' for tick in y_ticks])
     if cbar_label:
         cbar.set_label(cbar_label, fontsize="small")
 
-    return fig, axes
+        return fig, axes
 
 def prepare_impact_plot(impact_df, T_lim=None):
     # avg_impact = impact_df.xs(0.5, level="strength").droplevel("integral")
@@ -205,8 +259,6 @@ def prepare_impact_plot(impact_df, T_lim=None):
         "x_ticklabels": np.int16(tconv.round(0))[x_ticks],
         "y_ticks": y_ticks,
         "y_ticklabels": Tpeak.round(1)[y_ticks],
-        "vmin": impact_df.min(),
-        "vmax": impact_df.max(),
     }
 
 def prepare_tipping_plot(df, components):
@@ -297,8 +349,8 @@ def loess(X_plot, X_np, y_np, radius=0.2):
     pass # Awaiting implementation if it ever gets useful
 
 def weighted_avg(values, idxs, dists, sigma=0.05):
-        w = np.exp(-(dists**2) / (2*sigma**2))
-        return np.sum(w * values[idxs]) / np.sum(w)
+    w = np.exp(-(dists**2) / (2*sigma**2))
+    return np.sum(w * values[idxs]) / np.sum(w)
 
 def return_neighbors(X_grid, X_data, radius=0.2):
     X_norm, norm = normalize(X_data, norm="max", axis=0, return_norm=True)
@@ -389,18 +441,6 @@ def plot_legend(ax, cax=None):
     cax.axis('off')
     return cax
 
-
-def dataframeify(long_df:pd.DataFrame, new_data):
-    new_df = long_df.copy().xs("total", level="component")
-    new_df[:] = new_data
-
-    new_df = (
-        new_df
-        .groupby(level=["Tlim", "Tpeak", "tconv"])
-        .mean()
-    )
-    return new_df
-
 def interaction_difference(df, component):
     feature = df.xs(component, level="component")
     return (feature.xs(1.0, level="strength") - feature.xs(0.0, level="strength")).droplevel("integral")
@@ -467,13 +507,8 @@ def cartesian_product(*arrays):
     return arr.reshape(-1, la)
 
 def state_plot(state_df:pd.DataFrame):
-    X_temp = state_df.xs((1.0, "total"), level=["strength", "component"]).reset_index()[
-        OVERSHOOT_PROPERTIES].to_numpy()
-    X_plot = cartesian_product(np.arange(0, 2.1, 1),
-                               np.linspace(2, 6, 10),
-                               np.linspace(100, 1000, 10))
-    neighbors = return_neighbors(X_plot, X_temp, radius=0.06) # avoids taking points at other Tlims
-    impact_dfs = {}
+    X_plot, neighbors = lay_plot_grid(state_df)
+    cfgs = {}
     for component in state_df.index.get_level_values("component").unique():
         y_grid = {}
         for key in state_df.index.get_level_values("strength").unique():
@@ -482,16 +517,13 @@ def state_plot(state_df:pd.DataFrame):
                                     for idx in neighbors])
             print(f"{component},{key}:{np.mean(y_component)}")
         impact_component = y_grid[1.0] - y_grid[0.0]
-        impact_dfs[component] = pd.DataFrame({"value": impact_component},
+        impact_df = pd.DataFrame({"value": impact_component},
                                index=pd.MultiIndex.from_arrays(X_plot.T, names=OVERSHOOT_PROPERTIES))
-    cfg_total = prepare_impact_plot(impact_dfs["total"])
-    cfg_gis = prepare_impact_plot(impact_dfs["GIS"])
-    cfg_wais = prepare_impact_plot(impact_dfs["WAIS"])
-    cfg_amoc = prepare_impact_plot(impact_dfs["AMOC"])
-    cfg_amazonas = prepare_impact_plot(impact_dfs["Amazonas"])
-    cfg_total["titles"] = [f"{chr(97+i)}) {cfg_total["titles"][i]}" for i in range(3)]  # Look ma, I took a C course!
+        cfgs[component] = prepare_impact_plot(impact_df)
+
+    cfgs["titles"] = [f"{chr(97+i)}) {cfgs["totals"]["titles"][i]}" for i in range(3)]  # Look ma, I took a C course!
     fig, axes = imshow_grid(
-        **cfg_total,
+        **cfgs["totals"],
         nrows=2,
         ncols=3,
         figsize=set_plot_size("article"),
@@ -499,27 +531,19 @@ def state_plot(state_df:pd.DataFrame):
         ylabel=r"Peak temperature / $^\circ C$",
         cbar_label=r"Impact on \# tipped",
     )
-
-    element_tlim_index = 2
-    rgb_matrix = np.array([
-        cfg_amazonas["matrices"][element_tlim_index],
-        cfg_amoc["matrices"][element_tlim_index],
-        cfg_gis["matrices"][element_tlim_index],
-    ]).transpose((1, 2, 0))
-    vmax = rgb_matrix.max()
-    vmin = rgb_matrix.min()
+    elements = ["AMOC", "Amazonas", "GIS"]
+    element_Tlim_index = 2
+    state_plots = np.array([cfgs[element]["matrices"] for element in elements])
+    vmax = state_plots.max()
+    vmin = state_plots.min()
     diverging_map = "managua"  # shiftedColorMap(plt.cm.coolwarm, 0, 1 - vmax / (vmax + abs(vmin)), 1)
     divnorm = colors.TwoSlopeNorm(vcenter=0, vmin=-vmax, vmax=vmax)
-    axes[3].imshow(cfg_amoc["matrices"][element_tlim_index], origin="lower", aspect="auto",
+    for i, (ax, component) in enumerate(zip(axes[3:], )):
+        im = ax.imshow(cfgs[component]["matrices"][element_Tlim_index], origin="lower", aspect="auto",
                    cmap=diverging_map, norm=divnorm)
-    axes[4].imshow(cfg_amazonas["matrices"][element_tlim_index], origin="lower", aspect="auto",
-                   cmap=diverging_map, norm=divnorm)
-    im = axes[5].imshow(cfg_gis["matrices"][element_tlim_index], origin="lower", aspect="auto",
-                        cmap=diverging_map, norm=divnorm)
-    cfg_total["titles"].append(r"d) AMOC")
-    cfg_total["titles"].append(r"e) AR")
-    cfg_total["titles"].append(r"f) GIS")
-    for ax, title in zip(axes, cfg_total["titles"]):
+        cfgs["titles"].append(rf"{chr(100+i)}) {component}")
+
+    for ax, title in zip(axes, cfgs["titles"]):
         ax.set_title(title, loc='left', fontsize='medium')
 
     colorbar = fig.colorbar(im, ax=axes[3:])
@@ -527,11 +551,16 @@ def state_plot(state_df:pd.DataFrame):
     colorbar.ax.set_ylim(vmin - 0.03, vmax)  # cant go above b/c colorspace ends there
     y_ticks = [np.round(vmin, 1), *np.arange(0, 0.6, 0.5), np.round(vmax, 1)]
     colorbar.ax.set_yticks(y_ticks, y_ticks)  # get_yticks is useless as ever, so this needs to be hardcoded
-    overshoot_ax = axes[-1].inset_axes((0.49, 0.15, 0.5, 0.5))
-    overshoot_ax.patch.set_alpha(0.0)
-    inset_indicator = axes[-1].indicate_inset((2.5, 3.5, 1, 1), inset_ax=overshoot_ax, edgecolor='k', alpha=1, lw=0.5,
-                                              transform=axes[-1].transData)
 
+    plot_overshoot_inset(axes[-1])
+    plt.show()
+
+
+def plot_overshoot_inset(ax: Axes):
+    overshoot_ax = ax.inset_axes((0.49, 0.15, 0.5, 0.5))
+    overshoot_ax.patch.set_alpha(0.0)
+    inset_indicator = ax.indicate_inset((2.5, 3.5, 1, 1), inset_ax=overshoot_ax, edgecolor='k', alpha=1, lw=0.5,
+                                              transform=ax.transData)
     for connector in inset_indicator.connectors:
         connector.set(color="w")
     inset_indicator.connectors[0].set(visible=True)
@@ -539,20 +568,16 @@ def state_plot(state_df:pd.DataFrame):
     inset_indicator.connectors[3].set(visible=False)
     inset_indicator.rectangle.set(edgecolor="w")
     overshoot_plot(overshoot_ax)
-    # components = ["AMOC", "GIS", "Amazonas", "total"]
-    # cfg_tipping = prepare_tipping_plot(long_df, components)
-    # nrows = 2 if len(components) > 1 else 1
-    # ncols = int(np.ceil(len(components) / nrows))
-    # imshow_grid(
-    #     **cfg_tipping,
-    #     nrows=nrows,
-    #     ncols=ncols,
-    #     figsize=(4 * nrows, 3 * ncols),
-    #     xlabel="Integrated Temperature index",
-    #     ylabel="Interaction strength",
-    #     cbar_label="value",
-    # )
-    plt.show()
+
+
+def lay_plot_grid(state_df: DataFrame) -> tuple[list[int] | Any, ndarray[tuple[int, int], dtype[Any]]]:
+    X_temp = state_df.index.to_frame(index=False)[OVERSHOOT_PROPERTIES].drop_duplicates().to_numpy()
+    X_plot = cartesian_product(np.arange(0, 2.1, 1),
+                               np.arange(2, 6.1, 1),
+                               np.arange(100, 1001, 100))
+    neighbors = return_neighbors(X_plot, X_temp, radius=0.06)  # avoids taking points at other Tlims
+    return X_plot, neighbors
+
 
 def cascade_analysis(df, X_temp):
     tipping_properties = pd.read_csv(f"{FOLDER}/tipping_properties.csv", index_col=0)
@@ -628,19 +653,10 @@ def cascade_analysis(df, X_temp):
 
 
 def precompute_paths(cascades, components):
-    # --------------------------------------------------
-    # Your MultiIndex columns already define edge order
-    # --------------------------------------------------
-
     cols = cascades.columns  # the MultiIndex you showed
 
     # 12 directed edges in fixed order:
     # ('Amazonas','AMOC'), ('Amazonas','GIS'), ...
-
-    # --------------------------------------------------
-    # Nodes
-    # --------------------------------------------------
-
     nodes = components
 
     # map edge -> bit position
@@ -713,8 +729,101 @@ def causal_analysis(timing_df, X_temp):
     print(dml_plr_tree.summary)
 
 
+def combine_cfg_matrices(cfgs, components, index):
+    """Combine the nth matrix entry from selected configuration dictionaries.
 
-def plot_configuration():
+    Args:
+        cfgs (dict): Dictionary of configuration dictionaries
+        components (list): List of component names to combine
+        index (int): Index of the matrix to extract from each component
+
+    Returns:
+        dict: Combined configuration with matrices, titles, and other properties
+    """
+    combined = {
+        "matrices": [cfgs[comp]["matrices"][index] for comp in components],
+        "titles": [cfgs[comp]["titles"][index] for comp in components],
+        "x_ticks": cfgs[components[0]]["x_ticks"],
+        "x_ticklabels": cfgs[components[0]]["x_ticklabels"],
+        "y_ticks": cfgs[components[0]]["y_ticks"],
+        "y_ticklabels": cfgs[components[0]]["y_ticklabels"],
+    }
+    return combined
+
+
+def intervention_analysis(state_df, timing_df):
+    # X_plot, neighbors = lay_plot_grid(state_df)
+
+    state_series = state_df[50000]
+    X_plot = state_series.index.to_frame(index=False)[OVERSHOOT_PROPERTIES].drop_duplicates().to_numpy()
+    for intervention in state_series.index.get_level_values("interventions").unique():
+        cfgs = {}
+        for component in state_series.index.get_level_values("component").unique():
+            if component in [intervention,
+                             "NINO"]:  # uninteresting, cuz component then isnt dynamic/not tipping element
+                continue
+            # WAIS and GIS tip too slowly to show much effect on each other after 1ka
+            no_tip = state_series.xs((intervention, -1, component),
+                                     level=["interventions", "intervention_states", "component"])
+            tip = state_series.xs((intervention, 1, component),
+                                  level=["interventions", "intervention_states", "component"])
+            free_run = state_series.xs((intervention, 0, component),
+                                       level=["interventions", "intervention_states", "component"])
+            if component == "total":  # remove the effect of the intervention on the total
+                tip -= state_series.xs((intervention, 1, intervention),
+                                       level=["interventions", "intervention_states", "component"]) > 0
+            p_intervention = ((state_df[50000].xs((intervention, 0, intervention),
+                                                  level=["interventions", "intervention_states", "component"]) > 1)
+                              .groupby(level=[OVERSHOOT_PROPERTIES]).mean())
+            y_component = tip - no_tip
+            ate_on_component = y_component.groupby(
+                level=[OVERSHOOT_PROPERTIES]).mean()  # np.array([y_component[idx].mean() for idx in neighbors])
+
+            print(
+                f"ATE of {intervention} on {component}:{np.mean(ate_on_component):.2f}+-{np.std(ate_on_component):.2f}")
+            impact_df = pd.DataFrame({"value": ate_on_component},
+                                     index=pd.MultiIndex.from_arrays(X_plot.T, names=OVERSHOOT_PROPERTIES))
+            cfgs[component] = prepare_impact_plot(impact_df)
+
+        # Create combined configuration for selected components at index 2
+        selected_components = ["AMOC", "Amazonas", "GIS", "WAIS"]
+        selected_components.remove(intervention)
+        cfgs["combined"] = combine_cfg_matrices(cfgs, selected_components, 2)
+
+        cfgs["titles"] = [f"{chr(97 + i)}) {cfgs["total"]["titles"][i]}" for i in
+                          range(4)]  # Look ma, I took a C course!
+        fig, axes = imshow_grid(
+            **cfgs["total"],
+            nrows=2,
+            ncols=2,
+            figsize=set_plot_size("article"),
+            xlabel="Convergence time / a",
+            ylabel=r"Peak temperature / $^\circ C$",
+            cbar_label=rf"Impact of {intervention} on elements",
+            cbar_axis=4
+        )
+        fig.suptitle(f"Impact of {intervention}", fontsize="medium")
+        for ax, title in zip(axes, cfgs["titles"]):
+            ax.set_title(title, loc='left', fontsize='medium')
+        plot_overshoot_inset(axes[-1])
+
+        # Plot combined configuration
+        fig_combined, axes_combined = imshow_grid(
+            **cfgs["combined"],
+            nrows=1,
+            ncols=3,
+            figsize=set_plot_size("article", fraction=1, subplots=(1, 3)),
+            xlabel="Convergence time / a",
+            ylabel=r"Peak temperature / $^\circ C$",
+            cbar_label=rf"Impact of {intervention} on element",
+            cbar_axis=3
+        )
+        fig_combined.suptitle(fr"Impact of {intervention} at $T_\mathrm{{lim}}={cfgs['combined']['titles'][0].split('=')[1]}",
+                              fontsize="medium")
+    plt.show()
+
+
+def plot_pf_calibration():
     data = pd.read_csv("interaction_calibration.csv", header=[0, 1], index_col=0)
     plt.plot(data['gis_to_thc']['pf'], data['gis_to_thc']['interaction_fac'])
     plt.xlabel("PF")
@@ -732,17 +841,16 @@ def main():
         timing_df.drop(columns = "nino_state", inplace=True) # preliminary
     state_df = load_longform_df(fr"{FOLDER}\dataframe.csv")
     for keyword, timeframe in timeframes.items():
-        temperature_index = state_df.xs("total", level="component").index.unique()
-        # max_chain_df, chain_start_df = cascade_analysis(timing_df, temperature_index)
+        intervention_analysis(state_df, timing_df)
         snapshot_df = state_df[timeframe]
         snapshot_df.name = "value"
         # snapshot_df = pd.concat([snapshot_df, max_chain_df]).sort_index()
         state_plot(snapshot_df)
 
 OVERSHOOT_PROPERTIES = ["T_lim", "T_peak", "t_conv"]
-FOLDER = r"C:\Users\lukas\Documents\PhD\numerical_data\results\network_full_range\2026-04-05_1"
-
-main()
+FOLDER = r"C:\Users\lukas\Documents\PhD\numerical_data\results\intervention\2026-05-15_2"
+if __name__ == "__main__":
+    main()
 
 
 # No connection THC-to-AMAZ, indirect influence ATE: -0.0589 (0.27 tipping chance, 0.15 if thc tipped before. Oddly, additional
@@ -750,3 +858,4 @@ main()
 # AMOC tipping slower than AMAZ, but exerting influence already)
 # Full connection ATE: -0.1875 (0.22 tipping chance, 0.088 if thc tipped before)
 # Read: if I set THC to tipped, AMAZ would not tip in an additional 18% of scenarios
+# TODO: influence in flat trajectories, additional elements from bara

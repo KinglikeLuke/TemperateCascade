@@ -42,13 +42,28 @@ def pf_to_interaction(earth_params, name):
     return np.interp(earth_params[name], columns["pf"], columns["interaction_fac"])
 
 def intervene_in_network(net, intervention_element, intervention_state, node_dict):
+    """
+    Performs a do-intervention on the network in-place, changing the type of the specified element and removing all
+    incoming links
+    Args:
+        net: tipping network
+        intervention_element: name of the element to be intervened
+        intervention_state: into which state it should be put. -1 for untipped, 1 for tipped, 0 for no intervention
+        node_dict: assigns indices to element names
+
+    Returns:
+        net, initial_state. Net is changed in-place anyway!
+    """
     initial_state = -1 * np.ones(len(net.nodes))  # initial state
-    if intervention_element in ["wais", "gis"] and intervention_state == 1:
+    if not intervention_state:
+        return net, initial_state
+    if intervention_element in ["WAIS", "GIS"] and intervention_state == 1:
         intervention_node = derivative_intervention(**net.nodes[node_dict[intervention_element]]['data'].get_par())
     else:
         intervention_node = state_intervention()
         initial_state[node_dict[intervention_element]] = intervention_state
     net.update_element(node_dict[intervention_element], intervention_node)
+    net.remove_edges_from(list(net.in_edges(node_dict[intervention_element]))) # remove incoming edges to fix element evolution
     return net, initial_state
 
 def earth_network(earth_params: dict, temperature, strength, kk0, kk1, kk2):
@@ -81,7 +96,7 @@ def earth_network(earth_params: dict, temperature, strength, kk0, kk1, kk2):
     # net.add_element(assi)
     node_dict = {"GIS":0, "AMOC":1, "WAIS":2, "Amazonas":3, "NINO":4}
     ######################################Set edges to active state#####################################
-    net.add_coupling(1, 0, linear_coupling(strength=-(1.0 / earth_params['gis_time']) * strength * pf_to_interaction(earth_params, 'pf_thc_to_gis'), x_0=-1))
+    net.add_coupling(1, 0, linear_coupling(strength=(1.0 / earth_params['gis_time']) * strength * pf_to_interaction(earth_params, 'pf_thc_to_gis'), x_0=-1))
     net.add_coupling(2, 0, linear_coupling(strength=(1.0 / earth_params['gis_time']) * strength *pf_to_interaction(earth_params, 'pf_wais_to_gis'), x_0=-1))
 
     # Derivative coupling maybe a bit rash
@@ -90,7 +105,7 @@ def earth_network(earth_params: dict, temperature, strength, kk0, kk1, kk2):
     # derivative coupling has pretty substantial impact on performance (20% more)
     net.add_coupling(0, 1, cusp_derivative_coupling(strength=(1.0 / earth_params['thc_time']) * earth_params['gis_time'] * strength * 
                                                     pf_to_interaction(earth_params, 'pf_gis_to_thc'), params=gis.get_par()))
-    net.add_coupling(2, 1, cusp_derivative_coupling(strength=(1.0 / earth_params['thc_time']) * earth_params['gis_time'] * strength * 
+    net.add_coupling(2, 1, cusp_derivative_coupling(strength=(1.0 / earth_params['thc_time']) * earth_params['wais_time'] * strength *
                                                     pf_to_interaction(earth_params, 'pf_wais_to_thc'), params=wais.get_par()))
     net.add_coupling(4, 1, linear_coupling(strength=(1.0 / earth_params['thc_time']) * strength * pf_to_interaction(earth_params, 'pf_nino_to_thc')*kk1, x_0=-1))
     # net.add_coupling(5, 1, linear_coupling(strength=(1.0 / earth_params.thc_time) * strength * earth_params.pf_assi_to_thc, x_0=-1))

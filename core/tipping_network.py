@@ -1,5 +1,6 @@
 from networkx import DiGraph
 import networkx as nx
+from core.coupling import cusp_derivative_coupling # TODO ugly hack
 import numpy as np
 
 
@@ -19,6 +20,13 @@ class tipping_network(DiGraph):
         self.nodes[old_element_idx].update(data = new_element)
         self._node[old_element_idx]['lambda_f'] = new_element.dxdt_diag()
         self._node[old_element_idx]['lambda_jac'] = new_element.jac_diag()
+        # Because of the way the couplings are implemented, we need to update the couplings with the new element params
+        # TODO change the way derivative couplings are implemented
+        for edge in list(self.edges(old_element_idx, data=True)):
+            coupling = edge[2]['data']
+            if isinstance(coupling, cusp_derivative_coupling):
+                self.remove_edge(edge[0], edge[1])
+                self.add_coupling(edge[0], edge[1], cusp_derivative_coupling(coupling._strength, new_element.get_par()))
 
     def add_coupling( self, from_id, to_id, coupling):
         super().add_edge( from_id, to_id, data = coupling)

@@ -113,7 +113,7 @@ def set_colormap(ax, data_length):
 def model_strengths():
     # Saving, folder creation only once first run goes through
     coupling_strengths = [0, 1]
-    folder = prepare_folder("strengths")
+    directory_name = prepare_folder("strengths")
 
     index = pd.MultiIndex.from_arrays(
         [[], [], [], [], [], []],
@@ -159,19 +159,19 @@ def model_strengths():
 
         state_record = [] # so it doesn't annoy me in debugger
         # structure: strength x features x time
-        state_index = make_state_index(i, T_lims, T_peaks, t_convs, tipping_df, strengths = coupling_strengths, components = COMPONENTS)
+        state_index = make_state_index(i, T_lims, T_peaks, t_convs, tipping_df, strengths = coupling_strengths)
 
         tipping_df = state_results_to_df(state_index, state_output, tipping_df)
         timing_df = timing_results_to_df(state_index, timing_output, timing_df)
 
         if not DEBUGGING_MODE: # to stop it from cluttering my workspace with folders
-            if not os.path.isdir(folder): # if this is the first time we get here - whether the name fits is decided before the run
-                os.makedirs(folder)
-            tipping_df.to_csv(f"{folder}/dataframe.csv")
-            timing_df.to_csv(f"{folder}/timing_dataframe.csv")
+            if not os.path.isdir(directory_name): # if this is the first time we get here - whether the name fits is decided before the run
+                os.makedirs(directory_name)
+            tipping_df.to_csv(f"{directory_name}/dataframe.csv")
+            timing_df.to_csv(f"{directory_name}/timing_dataframe.csv")
 
     lhs_df = pd.DataFrame(input_file, columns=KEYS)
-    lhs_df.to_csv(f"{folder}/tipping_properties.csv")
+    lhs_df.to_csv(f"{directory_name}/tipping_properties.csv")
 
     # current_dir = os.getcwd()
     # os.chdir("{}/network_{}_{}_{}/".format(long_save_name, kk[0], kk[1], kk[2]))
@@ -209,9 +209,13 @@ def model_strengths():
     print("Finish")
 
 def model_interventions():
-    # Saving, folder creation only once first run goes through
-    interventions = COMPONENTS[:4]
-    intervention_states = [-1, 1]
+    """
+    Performs do-interventions on the network with every tipping element, once tipped, once untipped.
+    Returns:
+
+    """
+    interventions = COMPONENTS[:3] # Amazonas has no outgoing connections, therefore cannot have a causal effect
+    intervention_states = [-1, 0, 1]
     folder = prepare_folder("intervention")
 
     index = pd.MultiIndex.from_arrays(
@@ -219,12 +223,12 @@ def model_interventions():
         names=["lhc", "T_peak", "T_lim", "t_conv", "intervention", "state", "component"]
     )
     tipping_df = pd.DataFrame({}, index=index)
-    timing_df = pd.DataFrame({"tip_time": pd.Series(dtype="float64")}, index=index)
+    timing_df = pd.DataFrame({}, index=index)
 
+    T_lims, T_peaks, t_convs = prepare_overshoots(random=False)
     for i, sys_var in enumerate(tqdm(input_file)):
         conv_fac_gis, earth_params = prepare_earth_params(sys_var)
 
-        T_lims, T_peaks, t_convs = prepare_overshoots()
         state_output = []
         timing_output = []
         T_index = 0
@@ -232,7 +236,7 @@ def model_interventions():
             try:
                 R, mu_0, mu_1 = fit_parameters(T_0, T_peak, T_lim, t_conv)
             except RuntimeError as error:
-                print(f"{error}: Parameters T_peak:{T_peak}, T_lim:{T_lim}, t_conv:{t_conv}")
+                print(f"{error} Parameters T_peak:{T_peak}, T_lim:{T_lim}, t_conv:{t_conv}")
                 T_peaks = np.delete(T_peaks, T_index)
                 T_lims = np.delete(T_lims, T_index)
                 t_convs = np.delete(t_convs, T_index)
@@ -267,11 +271,11 @@ def model_interventions():
         state_record = [] # so it doesn't annoy me in debugger
         # structure: strength x features x time
         state_index = make_state_index(i, T_lims, T_peaks, t_convs, tipping_df, interventions = interventions,
-                                       intervention_states = intervention_states, components = COMPONENTS)
+                                       intervention_states = intervention_states)
 
         tipping_df = state_results_to_df(state_index, state_output, tipping_df) # these modify the df in place
         timing_df = timing_results_to_df(state_index, timing_output, timing_df)
-
+        # TODO somethings fucked with the Amazon intervetion
         if not DEBUGGING_MODE: # to stop it from cluttering my workspace with folders
             if not os.path.isdir(folder): # if this is the first time we get here - whether the name fits is decided before the run
                 os.makedirs(folder)
@@ -298,12 +302,21 @@ def simulate_network(net, initial_state, conv_fac_gis):
     return sol, tip_times, total_tipped
 
 
-def prepare_overshoots():
-    lhc_distr = np.array(lhs(3, samples=N_OVERSHOOTS))
-    T_peaks = np.round(4 * lhc_distr[:, 0] + 2, 2)
-    # T_lims = np.round(2*lhc_distr[:,1], 2)
-    T_lims = np.round(2 * lhc_distr[:, 1], 2)  # for plotting in the T_lim plane
-    t_convs = np.round(900 * lhc_distr[:, 2] + 100, 0)
+def prepare_overshoots(random=True):
+    if random:
+        lhc_distr = np.array(lhs(3, samples=N_OVERSHOOTS))
+        T_peaks = np.round(4 * lhc_distr[:, 0] + 2, 2)
+        # T_lims = np.round(2*lhc_distr[:,1], 2)
+        T_lims = np.round(2 * lhc_distr[:, 1], 2)  # for plotting in the T_lim plane
+        t_convs = np.round(900 * lhc_distr[:, 2] + 100, 0)
+    else:
+        T_peaks_grid = np.arange(2., 6.1, 0.5)
+        T_lims_grid = np.arange(0, 2.1, 0.5)
+        t_convs_grid = np.arange(100, 1001, 100)
+        T_peaks_mesh, T_lims_mesh, t_convs_mesh = np.meshgrid(T_peaks_grid, T_lims_grid, t_convs_grid, indexing='ij')
+        T_peaks = T_peaks_mesh.flatten()
+        T_lims = T_lims_mesh.flatten()
+        t_convs = t_convs_mesh.flatten()
     return T_lims, T_peaks, t_convs
 
 
@@ -330,6 +343,14 @@ def prepare_earth_params(sys_var):
 
 
 def prepare_folder(experiment_name):
+    """
+    Create the name of a new folder listing the date and the progressive index of the experiment
+    Args:
+        experiment_name:
+
+    Returns:
+
+    """
     folder = f"{long_save_name}/{experiment_name}/{startdate}_1"
     while os.path.isdir(f"{folder}"):
         match = re.search(r"_(\d+)$", folder)
@@ -340,7 +361,7 @@ def prepare_folder(experiment_name):
 
 
 def timing_results_to_df(state_index, timing_output, timing_df):
-    timing_index = state_index.copy().drop("total", level="components")
+    timing_index = state_index.copy().drop("total", level="component")
     new_timing_df = pd.DataFrame(
         {"tip_time": np.round(np.array(timing_output).flatten(), 3)},
         index=timing_index,
@@ -360,10 +381,10 @@ def state_results_to_df(state_index, state_output, tipping_df):
     medium_index = np.argmin(np.abs(t_grid - 1000))
     far_index = -1
     new_tipping_df = pd.DataFrame(
-        {year: states for year, states in zip(np.round(t_grid[[medium_index, far_index]], 0),
-                                          data[..., [medium_index, far_index]].flatten())},
+        {np.round(t_grid[medium_index]): data[..., medium_index].flatten(),
+         np.round(t_grid[far_index]): data[..., far_index].flatten()},
         index=state_index,
-    )
+    ) # idk why the old version ever worked
     tipping_df = pd.concat([tipping_df, new_tipping_df])
     return tipping_df
 
@@ -382,7 +403,7 @@ def make_state_index(i, T_lims, T_peaks,  t_convs, tipping_df, **index_levels):
     )
     for level_name, level_values in index_levels.items():
         merged = merged.merge(pd.DataFrame({level_name: level_values}), how="cross")
-
+    merged = merged.merge(pd.DataFrame({"component": COMPONENTS}), how="cross")
     state_index = pd.MultiIndex.from_frame(merged)
     return state_index
 
@@ -406,7 +427,8 @@ def rename_characteristic():
         os.rename(filename, new_filename)
 
 DEBUGGING_MODE = sys.monitoring.get_tool(sys.monitoring.DEBUGGER_ID) is not None
-model_interventions()
+if __name__ == "__main__":
+    model_interventions()
 # Good lord
 # The original Code steps in 0.1 (absolute? idk) year steps through the solver (because the stepsize is far greater than the calibrated(?) t_end)
 # However, it takes its Temperature curve as if it made 1 year steps (every step a new year)
