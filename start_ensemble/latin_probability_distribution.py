@@ -1,3 +1,4 @@
+import pandas as pd
 from scipy.integrate import odeint
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,6 +14,10 @@ elements["limits_thc"]= [1.4, 8.0]
 elements["limits_wais"] = [1.0, 3.0]
 elements["limits_amaz"] = [2.0, 6.0]
 elements["limits_nino"] = [3.0, 6.0]
+elements["limits_reef"]=[1.0, 2.0]
+elements["limits_wam"]=[2.0, 3.5]
+elements["limits_awsi"]=[4.5, 8.7]
+elements["limits_perm"]=[3.0, 6.0]
 # elements["limits_assi"] = [1.3, 2.9]
 
 ###################################################
@@ -21,14 +26,14 @@ elements["limits_nino"] = [3.0, 6.0]
 elements["pf_wais_to_gis"] = [1, 2]
 elements["pf_thc_to_gis"] = [0.1, 1.]
 # TO THC
-elements["pf_gis_to_thc"] = [1., 10.] 
+elements["pf_gis_to_thc"] = [1., 10.]
 elements["pf_nino_to_thc"] = [0.5, 2]
 elements["pf_wais_to_thc"] = [0.6, 1] # reaching 0.3 is effectively impossible. Also, weak, but stabilizing influence in GTPR2025
 # elements["pf_assi_to_thc"] = [0.1, 0.5]
 # TO WAIS. Generally, WAIS tips so often in an "intermediate" temperature trajectory that any factor greater than 2 is unattainable
-elements["pf_nino_to_wais"] = [1, 3] # TODO rerun with 5
+elements["pf_nino_to_wais"] = [1, 5] # TODO rerun with 5
 elements["pf_thc_to_wais" ]= [1, 1.5]
-elements["pf_gis_to_wais" ]= [1, 2.0] # ultra sketch. I dont know how they imagine a tenfold increase between ice sheets (having very similar limiting temperature and all...)
+elements["pf_gis_to_wais" ]= [1, 5.0] # ultra sketch. I dont know how they imagine a tenfold increase between ice sheets (having very similar limiting temperature and all...)
 #TO AMAZ
 elements["pf_nino_to_amaz"] = [1, 10]
 elements["pf_thc_to_amaz" ]= [0.5, 1] # sketch. Probably stabilizing, regional variations
@@ -36,14 +41,26 @@ elements["pf_thc_to_amaz" ]= [0.5, 1] # sketch. Probably stabilizing, regional v
 elements["pf_thc_to_nino"] = [0.1, 0.2]
 # # TO ASSI
 # elements["pf_thc_to_assi"] = [0.5, 0.1]
+# Bara Connections
+elements["pf_awsi_to_thc"] = [1, 3]
+elements["pf_awsi_to_gis"] = [1, 2]
+elements["pf_awsi_to_perm"] = [1, 2]
+elements["pf_thc_to_awsi"] = [0.3, 1]
+elements["pf_thc_to_wam"] = [1, 1.5]
+elements["pf_nino_to_reef"] = [1, 10]
+elements["pf_perm_to_thc"] = [1, 1.5]
 
 # TIMINGS
 # Rosser 2024
-elements["tau_gis"]=[1000, 15000]
-elements["tau_thc"]=[15,300]
-elements["tau_wais"]=[500, 13000]
-elements["tau_nino"]=[25, 200]
-elements["tau_amaz"]=[50, 200]
+elements["gis_time"]=[1000, 15000]
+elements["thc_time"]=[15,300]
+elements["wais_time"]=[500, 13000]
+elements["nino_time"]=[25, 200]
+elements["amaz_time"]=[50, 200]
+elements["reef_time"]=[10, 11]
+elements["wam_time"]=[10, 500]
+elements["awsi_time"]=[10, 100]
+elements["perm_time"]=[10, 300]
 # elements["tau_assi"]=[10,50]
 
 with open("limits.json", "w") as file:
@@ -68,8 +85,9 @@ for i in range(0, len(points)):
     print(i)
     array_limits.append([latin_function(value, points[i][element_ind]) for element_ind, value in enumerate(elements.values())])
 
-array_limits = np.array(array_limits)
-np.savetxt("latin_prob.txt", array_limits, delimiter=" ")
+array_limits = pd.DataFrame(array_limits, columns=list(elements.keys()))
+array_limits = array_limits.to_csv("latin_prob.txt", index=False)
+# np.savetxt("latin_prob.txt", array_limits, delimiter=" ")
 
 
 #Create .sh file to run on the cluster
@@ -80,55 +98,55 @@ np.savetxt("latin_prob.txt", array_limits, delimiter=" ")
 
 
 #tipping ranges and plots
-gis = array_limits.T[0]
-thc = array_limits.T[1]
-wais = array_limits.T[2]
-amaz = array_limits.T[3]
-
-
-plt.grid(True)
-plt.hist(gis, 24, facecolor='c', alpha=0.5, label="GIS")
-plt.hist(thc, 25, facecolor='b', alpha=0.5, label="THC")
-plt.hist(wais, 47, facecolor='k', alpha=0.5, label="WAIS")
-plt.hist(amaz, 10, facecolor='g', alpha=0.5, label="AMAZ")
-plt.legend(loc='best')
-plt.xlabel("Tipping range [°C]")
-plt.ylabel("N [#]")
-plt.tight_layout()
-plt.savefig("latin_prob_TR.png")
-plt.savefig("latin_prob_TR.pdf")
-#plt.show()
-plt.clf()
-plt.close()
-
-
-#coupling strength
-wais_to_gis = array_limits.T[4]
-thc_to_gis = array_limits.T[5]
-gis_to_thc = array_limits.T[6]
-wais_to_thc = array_limits.T[7]
-thc_to_wais = array_limits.T[8]
-gis_to_wais = array_limits.T[9]
-thc_to_amaz_pos = array_limits.T[10]
-
-
-plt.grid(True)
-plt.hist(wais_to_gis, 10, facecolor='c', alpha=0.5, label="wais_to_gis")
-plt.hist(thc_to_gis, 100, facecolor='b', alpha=0.5, label="thc_to_gis")
-plt.hist(gis_to_thc, 100, facecolor='k', alpha=0.5, label="gis_to_thc")
-plt.hist(wais_to_thc, 30, facecolor='r', alpha=0.5, label="wais_to_thc")
-plt.hist(thc_to_wais, 5, facecolor='#2D9575', alpha=0.5, label="thc_to_wais")
-plt.hist(gis_to_wais, 100, facecolor='#8E58C3', alpha=0.5, label="gis_to_wais")
-plt.hist(thc_to_amaz_pos, 40, facecolor='#FF5733', alpha=0.5, label="thc_to_amaz")
-plt.legend(loc='best')
-plt.xlabel("Probability fraction [a.u.]")
-plt.ylabel("N [#]")
-plt.tight_layout()
-plt.savefig("latin_prob_PF.png")
-plt.savefig("latin_prob_PF.pdf")
-#plt.show()
-plt.clf()
-plt.close()
+# gis = array_limits.T[0]
+# thc = array_limits.T[1]
+# wais = array_limits.T[2]
+# amaz = array_limits.T[3]
+#
+#
+# plt.grid(True)
+# plt.hist(gis, 24, facecolor='c', alpha=0.5, label="GIS")
+# plt.hist(thc, 25, facecolor='b', alpha=0.5, label="THC")
+# plt.hist(wais, 47, facecolor='k', alpha=0.5, label="WAIS")
+# plt.hist(amaz, 10, facecolor='g', alpha=0.5, label="AMAZ")
+# plt.legend(loc='best')
+# plt.xlabel("Tipping range [°C]")
+# plt.ylabel("N [#]")
+# plt.tight_layout()
+# plt.savefig("latin_prob_TR.png")
+# plt.savefig("latin_prob_TR.pdf")
+# #plt.show()
+# plt.clf()
+# plt.close()
+#
+#
+# #coupling strength
+# wais_to_gis = array_limits.T[4]
+# thc_to_gis = array_limits.T[5]
+# gis_to_thc = array_limits.T[6]
+# wais_to_thc = array_limits.T[7]
+# thc_to_wais = array_limits.T[8]
+# gis_to_wais = array_limits.T[9]
+# thc_to_amaz_pos = array_limits.T[10]
+#
+#
+# plt.grid(True)
+# plt.hist(wais_to_gis, 10, facecolor='c', alpha=0.5, label="wais_to_gis")
+# plt.hist(thc_to_gis, 100, facecolor='b', alpha=0.5, label="thc_to_gis")
+# plt.hist(gis_to_thc, 100, facecolor='k', alpha=0.5, label="gis_to_thc")
+# plt.hist(wais_to_thc, 30, facecolor='r', alpha=0.5, label="wais_to_thc")
+# plt.hist(thc_to_wais, 5, facecolor='#2D9575', alpha=0.5, label="thc_to_wais")
+# plt.hist(gis_to_wais, 100, facecolor='#8E58C3', alpha=0.5, label="gis_to_wais")
+# plt.hist(thc_to_amaz_pos, 40, facecolor='#FF5733', alpha=0.5, label="thc_to_amaz")
+# plt.legend(loc='best')
+# plt.xlabel("Probability fraction [a.u.]")
+# plt.ylabel("N [#]")
+# plt.tight_layout()
+# plt.savefig("latin_prob_PF.png")
+# plt.savefig("latin_prob_PF.pdf")
+# #plt.show()
+# plt.clf()
+# plt.close()
 
 print("Finish")
 

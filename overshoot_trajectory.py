@@ -82,6 +82,9 @@ def fit_parameters(T0, Tmax, T_lim, tconv, mu0=0.0015):
         _type_: _description_
     """
     eps = 1e-3
+    # Somewhat hacky workaround: flat trajectories with tconv = 0
+    if Tmax == T_lim and T0 == Tmax:
+        return 0, 0, 0
     if np.isclose(Tmax, T_lim, atol = eps):
         Tmax += 10*eps
     x0 = _initial_guess(T0, Tmax, T_lim, tconv, mu0=mu0, delta=eps)
@@ -125,6 +128,6 @@ def test_consistency():
 
 if __name__=="__main__":
     t = np.linspace(0, 2100)
-    plt.plot(t, overshoot_trajectory(t, 1, 2, *fit_parameters(1, 2, 2, 500)))
+    plt.plot(t, overshoot_trajectory(t, 2, 2, *fit_parameters(2, 2, 2, 500)))
     plt.show()
     # test_consistency()

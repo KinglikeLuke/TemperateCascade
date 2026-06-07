@@ -66,61 +66,54 @@ def intervene_in_network(net, intervention_element, intervention_state, node_dic
     net.remove_edges_from(list(net.in_edges(node_dict[intervention_element]))) # remove incoming edges to fix element evolution
     return net, initial_state
 
-def earth_network(earth_params: dict, temperature, strength, kk0, kk1, kk2):
+def earth_network(e_p: dict, temp, strength, kk0, kk1, kk2):
     """Create the Earth system tipping network.
 
-    params: dict containing keys used below (accessed directly via params[...] ).
+    e_p: dict, earth_params containing keys used below (accessed directly via params[...] ).
     temperature: callable t -> temperature
     strength: coupling strength scalar
     kk0, kk1, kk2: integers -1, 0, or +1 controlling optional couplings
     """
-    gis = t_cusp(a=-1.0 / earth_params['gis_time'], b=1.0 / earth_params['gis_time'],
-                 c=lambda t: (1.0 / earth_params['gis_time']) * global_functions.CUSPc(0., earth_params['limits_gis'], temperature(t)))
-    thc = t_cusp(a=-1.0 / earth_params['thc_time'], b=1.0 / earth_params['thc_time'],
-                 c=lambda t: (1.0 / earth_params['thc_time']) * global_functions.CUSPc(0., earth_params['limits_thc'], temperature(t)))
-    wais = t_cusp(a=-1.0 / earth_params['wais_time'], b=1.0 / earth_params['wais_time'],
-                 c=lambda t: (1.0 / earth_params['wais_time']) * global_functions.CUSPc(0., earth_params['limits_wais'], temperature(t)))
-    amaz = t_cusp(a=-1.0 / earth_params['amaz_time'], b=1.0 / earth_params['amaz_time'],
-                 c=lambda t: (1.0 / earth_params['amaz_time']) * global_functions.CUSPc(0., earth_params['limits_amaz'], temperature(t)))
-    nino = linear(a=-1 / earth_params['nino_time'], c=lambda t: (1.0 / earth_params['nino_time']) * global_functions.CUSPc(0., earth_params['limits_nino'], temperature(t)), x_0=-1.0)
-    # assi = linear(a=-1 / earth_params.assi_time, c=lambda t: (1.0 / earth_params.assi_time) * global_functions.CUSPc(0., earth_params.limits_assi, temperature(t)), x_0=-1.0)
-
-
     # set up network
     net = tipping_network()
-    net.add_element(gis)
-    net.add_element(thc)
-    net.add_element(wais)
-    net.add_element(amaz)
-    net.add_element(nino)
-    # net.add_element(assi)
-    node_dict = {"GIS":0, "AMOC":1, "WAIS":2, "Amazonas":3, "NINO":4}
+    nodes = {}
+    for t_e in ["gis", "thc", "wais", "amaz", "reef", "awsi", "perm", "wam"]:
+        nodes[t_e] = t_cusp(a=-1.0 / e_p[f"{t_e}_time"], b=1.0 / e_p[f"{t_e}_time"],
+                      c=lambda t: (1.0 / e_p[f"{t_e}_time"]) * global_functions.CUSPc(0., e_p[f"limits_{t_e}"], temp(t)))
+    nodes["nino"] = linear(a=-1 / e_p['nino_time'],
+                  c=lambda t: (1.0 / e_p['nino_time']) * global_functions.CUSPc(0., e_p['limits_nino'], temp(t)), x_0=-1.0)
+    for node in nodes.values():
+        net.add_element(node)
+    # Dicts preserve order since 3.7
+    node_dict = {"GIS":0, "AMOC":1, "WAIS":2, "Amazonas":3, "REEF":4, "AWSI":5, "PERM":6, "WAM":7, "NINO":8}
     ######################################Set edges to active state#####################################
-    net.add_coupling(1, 0, linear_coupling(strength=(1.0 / earth_params['gis_time']) * strength * pf_to_interaction(earth_params, 'pf_thc_to_gis'), x_0=-1))
-    net.add_coupling(2, 0, linear_coupling(strength=(1.0 / earth_params['gis_time']) * strength *pf_to_interaction(earth_params, 'pf_wais_to_gis'), x_0=-1))
+    net.add_coupling(1, 0, linear_coupling(strength=(1.0 / e_p['gis_time']) * strength * pf_to_interaction(e_p, 'pf_thc_to_gis'), x_0=-1))
+    net.add_coupling(2, 0, linear_coupling(strength=(1.0 / e_p['gis_time']) * strength * pf_to_interaction(e_p, 'pf_wais_to_gis'), x_0=-1))
 
-    # Derivative coupling maybe a bit rash
-    # net.add_coupling(0, 1, linear_coupling(strength=(1.0 / earth_params.thc_time) * strength * earth_params.pf_gis_to_thc, x_0=-1))
-    # net.add_coupling(2, 1, linear_coupling(strength=(1.0 / earth_params.thc_time) * strength * earth_params.pf_gis_to_thc, x_0=-1))
     # derivative coupling has pretty substantial impact on performance (20% more)
-    net.add_coupling(0, 1, cusp_derivative_coupling(strength=(1.0 / earth_params['thc_time']) * earth_params['gis_time'] * strength * 
-                                                    pf_to_interaction(earth_params, 'pf_gis_to_thc'), params=gis.get_par()))
-    net.add_coupling(2, 1, cusp_derivative_coupling(strength=(1.0 / earth_params['thc_time']) * earth_params['wais_time'] * strength *
-                                                    pf_to_interaction(earth_params, 'pf_wais_to_thc'), params=wais.get_par()))
-    net.add_coupling(4, 1, linear_coupling(strength=(1.0 / earth_params['thc_time']) * strength * pf_to_interaction(earth_params, 'pf_nino_to_thc')*kk1, x_0=-1))
+    net.add_coupling(0, 1, cusp_derivative_coupling(strength=(1.0 / e_p['thc_time']) * e_p['gis_time'] * strength *
+                                                             pf_to_interaction(e_p, 'pf_gis_to_thc'), params=nodes["gis"].get_par()))
+    net.add_coupling(2, 1, cusp_derivative_coupling(strength=(1.0 / e_p['thc_time']) * e_p['wais_time'] * strength *
+                                                             pf_to_interaction(e_p, 'pf_wais_to_thc'), params=nodes["wais"].get_par()))
+    net.add_coupling(8, 1, linear_coupling(strength=(1.0 / e_p['thc_time']) * strength * pf_to_interaction(e_p, 'pf_nino_to_thc') * kk1, x_0=-1))
     # net.add_coupling(5, 1, linear_coupling(strength=(1.0 / earth_params.thc_time) * strength * earth_params.pf_assi_to_thc, x_0=-1))
 
-    net.add_coupling(0, 2, linear_coupling(strength=(1.0 / earth_params['wais_time']) * strength * pf_to_interaction(earth_params, 'pf_gis_to_wais'), x_0=-1))
-    net.add_coupling(1, 2, linear_coupling(strength=(1.0 / earth_params['wais_time']) * strength * pf_to_interaction(earth_params, 'pf_thc_to_wais'), x_0=-1))
-    net.add_coupling(4, 2, linear_coupling(strength=(1.0 / earth_params['wais_time']) * strength * pf_to_interaction(earth_params, 'pf_nino_to_wais') , x_0=-1))
+    net.add_coupling(0, 2, linear_coupling(strength=(1.0 / e_p['wais_time']) * strength * pf_to_interaction(e_p, 'pf_gis_to_wais'), x_0=-1))
+    net.add_coupling(1, 2, linear_coupling(strength=(1.0 / e_p['wais_time']) * strength * pf_to_interaction(e_p, 'pf_thc_to_wais'), x_0=-1))
+    net.add_coupling(8, 2, linear_coupling(strength=(1.0 / e_p['wais_time']) * strength * pf_to_interaction(e_p, 'pf_nino_to_wais'), x_0=-1))
 
-    net.add_coupling(1, 3, linear_coupling(strength=(1.0 / earth_params['amaz_time']) * strength * pf_to_interaction(earth_params, 'pf_thc_to_amaz') * kk2, x_0=-1))
-    net.add_coupling(4, 3, linear_coupling(strength=(1.0 / earth_params['amaz_time']) * strength * pf_to_interaction(earth_params, 'pf_nino_to_amaz'), x_0=-1))
+    net.add_coupling(1, 3, linear_coupling(strength=(1.0 / e_p['amaz_time']) * strength * pf_to_interaction(e_p, 'pf_thc_to_amaz') * kk2, x_0=-1))
+    net.add_coupling(8, 3, linear_coupling(strength=(1.0 / e_p['amaz_time']) * strength * pf_to_interaction(e_p, 'pf_nino_to_amaz'), x_0=-1))
     # nino doesnt tip, so I use Nicos dimensional-analysis based approach (reconfigured so that it matches the new strength of the calibrated interactions)
-    net.add_coupling(2, 4, linear_coupling(strength=(1.0 / earth_params['nino_time']) * strength * earth_params['pf_thc_to_nino'], x_0=-1)) 
+    net.add_coupling(2, 8, linear_coupling(strength=(1.0 / e_p['nino_time']) * strength * e_p['pf_thc_to_nino'], x_0=-1))
 
     # net.add_coupling(3, 4, linear_coupling(strength=(1.0 / params.nino_time) * strength * params.pf_amaz_to_nino * kk1, x_0=-1)) # doesnt appear in GTP2025
-    
-    # net.add_coupling(1, 5, linear_coupling(strength=-(1.0 / earth_params.assi_time) * strength * earth_params.pf_thc_to_assi, x_0=-1))
-
+    # Bara Couplings
+    net.add_coupling(5, 1, linear_coupling(strength=(1.0 / e_p['thc_time']) * strength * pf_to_interaction(e_p, 'pf_awsi_to_thc'), x_0=-1))
+    net.add_coupling(5, 0, linear_coupling(strength=(1.0 / e_p['gis_time']) * strength * pf_to_interaction(e_p, 'pf_awsi_to_gis'), x_0=-1))
+    net.add_coupling(5, 6, linear_coupling(strength=(1.0 / e_p['perm_time']) * strength * pf_to_interaction(e_p, 'pf_awsi_to_perm'), x_0=-1))
+    net.add_coupling(1, 5, linear_coupling(strength=(1.0 / e_p['awsi_time']) * strength * pf_to_interaction(e_p, 'pf_thc_to_awsi'), x_0=-1))
+    net.add_coupling(1, 7, linear_coupling(strength=(1.0 / e_p['wam_time']) * strength * pf_to_interaction(e_p, 'pf_thc_to_wam'), x_0=-1))
+    net.add_coupling(8, 4, linear_coupling(strength=(1.0 / e_p['reef_time']) * strength * pf_to_interaction(e_p, 'pf_nino_to_reef'), x_0=-1))
+    net.add_coupling(6, 1, linear_coupling(strength=(1.0 / e_p['thc_time']) * strength * pf_to_interaction(e_p, 'pf_perm_to_thc'), x_0=-1))
     return net, node_dict

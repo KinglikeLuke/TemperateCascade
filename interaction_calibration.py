@@ -12,6 +12,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from overshoot_trajectory import fit_parameters, overshoot_trajectory
 from pydoe import lhs
+import tqdm
 
 # PyCascades imports
 from core.coupling import linear_coupling, cusp_derivative_coupling
@@ -20,14 +21,7 @@ from core.tipping_network import tipping_network
 from earth_sys.functions_earth_system_no_enso import global_functions
 
 
-KEYS = ['limits_gis','limits_thc','limits_wais','limits_amaz','limits_nino',
-    'pf_wais_to_gis','pf_thc_to_gis',
-    'pf_gis_to_thc','pf_nino_to_thc','pf_wais_to_thc',
-    'pf_nino_to_wais','pf_thc_to_wais','pf_gis_to_wais',
-    'pf_thc_to_nino',
-    'pf_nino_to_amaz', 'pf_thc_to_amaz',
-    'gis_time','thc_time','wais_time','nino_time','amaz_time']
-input_file = np.loadtxt(r"start_ensemble\latin_prob_calibration.txt", delimiter=" ")
+input_file = pd.read_csv(r"start_ensemble\latin_prob_calibration.txt", delimiter=",")
 limit_filename = r"start_ensemble\limits.json"
 with open(limit_filename, "r") as file:
     LIMITS = json.load(file)
@@ -160,16 +154,16 @@ def calibrate_interaction(cause:str, effect:str, derivative:bool, n_interaction_
         temperatures.append(lambda t, tlim = T_lim, r=R, mu0=mu_0, mu1=mu_1: overshoot_trajectory(t, T_0, tlim, r, mu0, mu1))
 
     for temperature in temperatures:
-        for params in input_file:
+        for params in input_file.iterrows():
             earth_params, cause_element, effect_element = initialize_elements(cause, effect, temperature, params)
             tip_isolated = intervention_effect(cause_element, effect_element, 0, derivative)
             total_isolated_tips += tip_isolated
 
     interaction_facs = np.linspace(*interaction_limit, n_interaction_strengths)
-    for i, interaction_fac in enumerate(interaction_facs):
+    for i, interaction_fac in enumerate(tqdm.tqdm(interaction_facs)):
         n_intervention = 0
         for temperature in temperatures:
-            for params in input_file:
+            for params in input_file.iterrows():
                 earth_params, cause_element, effect_element = initialize_elements(cause, effect, temperature, params)
                 interaction_strength = interaction_fac / earth_params[f"{effect}_time"]
                 if derivative:
@@ -188,11 +182,7 @@ def calibrate_interaction(cause:str, effect:str, derivative:bool, n_interaction_
 
 def initialize_elements(cause: str, effect: str, temperature, params) -> tuple[
     dict[Any, Any], t_cusp, t_cusp]:
-    values = list(map(float, params))  # -1 is the mc_dir
-
-    if len(KEYS) != len(values):
-        raise KeyError("KEYS and LHS dont match!")
-    earth_params = dict(zip(KEYS, values))
+    earth_params = params[1].to_dict()
     cause_element = t_cusp(a=-1.0 / earth_params[f"{cause}_time"], b=1.0 / earth_params[f"{cause}_time"],
                          c=lambda t:(1.0 / earth_params[f"{cause}_time"]) * global_functions.CUSPc(0., earth_params[
                              f"limits_{cause}"], temperature(t)))
@@ -201,19 +191,17 @@ def initialize_elements(cause: str, effect: str, temperature, params) -> tuple[
                               f"limits_{effect}"], temperature(t)))
     return earth_params, cause_element, effect_element
 
-pairs = [
-        ["gis", "thc", True],
-         ["wais", "thc", True],
-         ["thc", "gis", False],
-         ["wais", "gis", False],
-         ["gis", "wais", False],
-         ["thc", "wais", False],
-         ["thc", "amaz", False],
-        #  # I think these are fine (if nino=1 can be considered equivalent to "tipped")
-         ["nino", "thc", False],
-         ["nino", "wais", False],
-         ["nino", "amaz", False],
-         ]
+
+# Generate pairs automatically from pf_ entries in limits.json
+pairs = []
+for key in LIMITS.keys():
+    if key.startswith("pf_"):
+        # Extract cause and effect from "pf_cause_to_effect"
+        parts = key[3:].split("_to_")
+        if len(parts) == 2:
+            cause, effect = parts
+            derivative = (cause in ["wais", "gis"] and effect == "thc")
+            pairs.append([cause, effect, derivative])
 results = {}
 
 for pair in pairs:
@@ -223,6 +211,7 @@ for pair in pairs:
 
 full_df = pd.concat(results, axis=1)
 full_df.columns.names = ["component", "axis"]
+
 full_df.to_csv("interaction_calibration.csv")
 # TODO somehow, the pf of slightly positive interaction factors is smaller than one (???)
 # for params in input_file:

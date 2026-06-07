@@ -25,7 +25,6 @@ from matplotlib import colors
 
 import cProfile
 
-from torchvision.datasets import folder
 
 plt.rcParams.update({
     "text.usetex": True,               # Use LaTeX for all text
@@ -41,7 +40,7 @@ plt.rcParams.update({
     "xtick.direction": "out",
     'figure.constrained_layout.use': True,
     "legend.frameon":    False,
-    "figure.dpi": 300
+    "figure.dpi": 200
 })
 temp_df = pd.read_csv(r"temp_input\Tpeak_tconv_values\temp_input_values.txt", dtype=float, delimiter=" ", comment="#")
 temp_idx_df = temp_df.set_index(["T_lim", "T_peak", "t_conv"])
@@ -144,6 +143,7 @@ def calculate_clean_ticks(vmin, vmax, target_ticks=6):
     interior_ticks = np.arange(first_tick, last_tick + best_step / 2, best_step)
 
     # Always include exact min and max
+    all_ticks = interior_ticks
     if abs(interior_ticks[0] - vmin) > best_step / 4:
         all_ticks = np.concatenate([[vmin], interior_ticks])
     if abs(interior_ticks[-1] - vmax) > best_step / 4:
@@ -750,15 +750,14 @@ def combine_cfg_matrices(cfgs, components, index):
     }
     return combined
 
-
-def intervention_analysis(state_df, timing_df):
-    # X_plot, neighbors = lay_plot_grid(state_df)
-
-    state_series = state_df[50000]
+def extract_influences(state_series):
+    interventions = state_series.index.get_level_values("interventions").unique()
+    components = state_series.index.get_level_values("component").unique()
     X_plot = state_series.index.to_frame(index=False)[OVERSHOOT_PROPERTIES].drop_duplicates().to_numpy()
-    for intervention in state_series.index.get_level_values("interventions").unique():
-        cfgs = {}
-        for component in state_series.index.get_level_values("component").unique():
+    influences = {}
+    for intervention in interventions:
+        influences[intervention] = {}
+        for component in components:
             if component in [intervention,
                              "NINO"]:  # uninteresting, cuz component then isnt dynamic/not tipping element
                 continue
@@ -767,14 +766,14 @@ def intervention_analysis(state_df, timing_df):
                                      level=["interventions", "intervention_states", "component"])
             tip = state_series.xs((intervention, 1, component),
                                   level=["interventions", "intervention_states", "component"])
-            free_run = state_series.xs((intervention, 0, component),
-                                       level=["interventions", "intervention_states", "component"])
+            # free_run = state_series.xs((intervention, 0, component),
+            #                            level=["interventions", "intervention_states", "component"])
             if component == "total":  # remove the effect of the intervention on the total
                 tip -= state_series.xs((intervention, 1, intervention),
                                        level=["interventions", "intervention_states", "component"]) > 0
-            p_intervention = ((state_df[50000].xs((intervention, 0, intervention),
-                                                  level=["interventions", "intervention_states", "component"]) > 1)
-                              .groupby(level=[OVERSHOOT_PROPERTIES]).mean())
+            # p_intervention = ((state_df[50000].xs((intervention, 0, intervention),
+            #                                       level=["interventions", "intervention_states", "component"]) > 1)
+            #                   .groupby(level=[OVERSHOOT_PROPERTIES]).mean())
             y_component = tip - no_tip
             ate_on_component = y_component.groupby(
                 level=[OVERSHOOT_PROPERTIES]).mean()  # np.array([y_component[idx].mean() for idx in neighbors])
@@ -783,10 +782,19 @@ def intervention_analysis(state_df, timing_df):
                 f"ATE of {intervention} on {component}:{np.mean(ate_on_component):.2f}+-{np.std(ate_on_component):.2f}")
             impact_df = pd.DataFrame({"value": ate_on_component},
                                      index=pd.MultiIndex.from_arrays(X_plot.T, names=OVERSHOOT_PROPERTIES))
-            cfgs[component] = prepare_impact_plot(impact_df)
+            influences[intervention][component] = impact_df
+    return influences, X_plot
 
-        # Create combined configuration for selected components at index 2
+def intervention_analysis(state_df, timing_df):
+    # X_plot, neighbors = lay_plot_grid(state_df)
+    state_series = state_df[1000]
+    influences, _ = extract_influences(state_series)
+    for intervention in influences.keys():
         selected_components = ["AMOC", "Amazonas", "GIS", "WAIS"]
+        cfgs = {}
+        for component in influences[intervention].keys():
+            cfgs[component] = prepare_impact_plot(influences[intervention][component])
+        # Create combined configuration for selected components at index 2
         selected_components.remove(intervention)
         cfgs["combined"] = combine_cfg_matrices(cfgs, selected_components, 2)
 
@@ -822,6 +830,26 @@ def intervention_analysis(state_df, timing_df):
                               fontsize="medium")
     plt.show()
 
+def influence_plot(state_df):
+    state_series = state_df[1000]
+    interventions = state_series.index.get_level_values("interventions").unique()
+    components = state_series.index.get_level_values("component").unique()
+    influences, temperatures = extract_influences(state_series)
+    influence_matrix = np.zeros((len(interventions), len(components), temperatures.shape[0]))
+    for intervention in interventions:
+        for component in influences[intervention].keys():
+            influence_matrix[interventions.get_loc(intervention), components.get_loc(component), :] = (
+                influences[intervention][component].groupby(level=OVERSHOOT_PROPERTIES).mean().to_numpy().flatten())
+    for traj in range(influence_matrix.shape[-1]):
+        fig, ax = plt.subplots(figsize=set_plot_size("article"))
+        ax.imshow(influence_matrix[..., traj], origin="upper", aspect="auto", cmap="coolwarm",interpolation="none")
+        ax.set_xticks(range(len(components)), labels=components,
+                      rotation=45, ha="right", rotation_mode="anchor")
+        ax.set_yticks(range(len(interventions)), labels=interventions)
+        ax.set_title(f"T={temperatures[traj][0]}°C", fontsize='medium')
+    plt.show()
+
+
 
 def plot_pf_calibration():
     data = pd.read_csv("interaction_calibration.csv", header=[0, 1], index_col=0)
@@ -841,14 +869,15 @@ def main():
         timing_df.drop(columns = "nino_state", inplace=True) # preliminary
     state_df = load_longform_df(fr"{FOLDER}\dataframe.csv")
     for keyword, timeframe in timeframes.items():
-        intervention_analysis(state_df, timing_df)
+        # intervention_analysis(state_df, timing_df)
+        influence_plot(state_df)
         snapshot_df = state_df[timeframe]
         snapshot_df.name = "value"
         # snapshot_df = pd.concat([snapshot_df, max_chain_df]).sort_index()
         state_plot(snapshot_df)
 
 OVERSHOOT_PROPERTIES = ["T_lim", "T_peak", "t_conv"]
-FOLDER = r"C:\Users\lukas\Documents\PhD\numerical_data\results\intervention\2026-05-15_2"
+FOLDER = r"C:\Users\lukas\Documents\PhD\numerical_data\results\intervention\2026-06-02_1"
 if __name__ == "__main__":
     main()
 
@@ -859,3 +888,4 @@ if __name__ == "__main__":
 # Full connection ATE: -0.1875 (0.22 tipping chance, 0.088 if thc tipped before)
 # Read: if I set THC to tipped, AMAZ would not tip in an additional 18% of scenarios
 # TODO: influence in flat trajectories, additional elements from bara
+# Why do I have permafrost? Why do we use cusps without quadratic term?

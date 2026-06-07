@@ -41,12 +41,9 @@ class timing():
     """
     def timescales(self):
         new_params = copy.deepcopy(self.earth_params)
-        new_params['gis_time'] /= self.earth_params['amaz_time']
-        new_params['thc_time'] /= self.earth_params['amaz_time']
-        new_params['wais_time'] /= self.earth_params['amaz_time']
-        new_params['nino_time'] /= self.earth_params['amaz_time']
-        new_params['amaz_time'] /= self.earth_params['amaz_time']
-        # new_params['assi_time'] /= self.earth_params['assi_time']
+        for key in new_params.keys():
+            if key.endswith('time'):
+                new_params[key] /= self.earth_params['amaz_time']
         return new_params
 
 
