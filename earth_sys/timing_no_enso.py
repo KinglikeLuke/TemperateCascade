@@ -24,8 +24,8 @@ class timing():
 
 
         #Compute conversion factor
-        self._real_timescale = self.earth_params['gis_time']                   					 #value normed to GIS
-        self._timescale = self.earth_params['gis_time']/self.earth_params['amaz_time']                #value normed to GIS
+        self._real_timescale = self.earth_params['GIS_time']                   					 #value normed to GIS
+        self._timescale = self.earth_params['GIS_time']/self.earth_params['Amazonas_time']                #value normed to GIS
         self._tip_point_gis = 1.8  # most probable tipping point (see Robinson, 2012)    #value normed to GIS
         self._c_krit = np.sqrt(4 / 27)
         self._GMT_cal = 4.0                                        						 #normed temperature
@@ -43,7 +43,7 @@ class timing():
         new_params = copy.deepcopy(self.earth_params)
         for key in new_params.keys():
             if key.endswith('time'):
-                new_params[key] /= self.earth_params['amaz_time']
+                new_params[key] /= self.earth_params['Amazonas_time']
         return new_params
 
 

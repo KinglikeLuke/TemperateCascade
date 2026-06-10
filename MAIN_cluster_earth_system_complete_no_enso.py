@@ -257,7 +257,6 @@ def model_interventions():
             # state_output.append(state_record) # shape: temp_dim x interventions x components x time
             # timing_output.append(timing_record) # shape: temp_dim x interventions x components
 
-        state_record = [] # so it doesn't annoy me in debugger
         tipping_df = state_results_to_df(state_output, tipping_df) # these modify the df in place
         timing_df = timing_results_to_df(timing_output, timing_df)
         # TODO somethings fucked with the Amazon intervetion
@@ -327,8 +326,8 @@ def prepare_earth_params(sys_var):
     else:
         # no time scales included
         earth_params = earth_params_raw
-        earth_params["gis_time"], earth_params["amaz_time"], earth_params["nino_time"], earth_params["thc_time"], \
-            earth_params["wais_time"] = 1.0, 1.0, 1.0, 1.0, 1.0
+        earth_params["GIS_time"], earth_params["Amazonas_time"], earth_params["NINO_time"], earth_params["AMOC_time"], \
+            earth_params["WAIS_time"] = 1.0, 1.0, 1.0, 1.0, 1.0
         conv_fac_gis = 1.0
     return conv_fac_gis, earth_params
 

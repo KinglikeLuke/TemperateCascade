@@ -585,8 +585,7 @@ def cascade_analysis(df, X_temp):
     component_series = {component: df.xs(component, level="component").reindex(X_temp, fill_value=np.inf)
                         for component in components}
     cascades = {}
-    # names used in the LHS are so different from the ones used in data storage that this is the easiest way to get at them
-    translator = {"GIS":'gis_time', "AMOC":'thc_time', "WAIS":'wais_time', "Amazonas":'amaz_time', "NINO":'nino_time'}
+    translator = {component: f"{component}_time" for component in components}
     for initial_component_name, initial_component_data in component_series.items():
         initial_component_data = initial_component_data.to_numpy().flatten()
         for secondary_component_name, secondary_component_data in component_series.items():
@@ -751,7 +750,7 @@ def combine_cfg_matrices(cfgs, components, index):
     return combined
 
 def extract_influences(state_series):
-    interventions = state_series.index.get_level_values("interventions").unique()
+    interventions = state_series.index.get_level_values("intervention").unique()
     components = state_series.index.get_level_values("component").unique()
     X_plot = state_series.index.to_frame(index=False)[OVERSHOOT_PROPERTIES].drop_duplicates().to_numpy()
     influences = {}
@@ -763,16 +762,16 @@ def extract_influences(state_series):
                 continue
             # WAIS and GIS tip too slowly to show much effect on each other after 1ka
             no_tip = state_series.xs((intervention, -1, component),
-                                     level=["interventions", "intervention_states", "component"])
+                                     level=["intervention", "state", "component"])
             tip = state_series.xs((intervention, 1, component),
-                                  level=["interventions", "intervention_states", "component"])
+                                  level=["intervention", "state", "component"])
             # free_run = state_series.xs((intervention, 0, component),
-            #                            level=["interventions", "intervention_states", "component"])
+            #                            level=["intervention", "state", "component"])
             if component == "total":  # remove the effect of the intervention on the total
                 tip -= state_series.xs((intervention, 1, intervention),
-                                       level=["interventions", "intervention_states", "component"]) > 0
+                                       level=["intervention", "state", "component"]) > 0
             # p_intervention = ((state_df[50000].xs((intervention, 0, intervention),
-            #                                       level=["interventions", "intervention_states", "component"]) > 1)
+            #                                       level=["intervention", "state", "component"]) > 1)
             #                   .groupby(level=[OVERSHOOT_PROPERTIES]).mean())
             y_component = tip - no_tip
             ate_on_component = y_component.groupby(
@@ -832,7 +831,7 @@ def intervention_analysis(state_df, timing_df):
 
 def influence_plot(state_df):
     state_series = state_df[1000]
-    interventions = state_series.index.get_level_values("interventions").unique()
+    interventions = state_series.index.get_level_values("intervention").unique()
     components = state_series.index.get_level_values("component").unique()
     influences, temperatures = extract_influences(state_series)
     influence_matrix = np.zeros((len(interventions), len(components), temperatures.shape[0]))
@@ -853,7 +852,7 @@ def influence_plot(state_df):
 
 def plot_pf_calibration():
     data = pd.read_csv("interaction_calibration.csv", header=[0, 1], index_col=0)
-    plt.plot(data['gis_to_thc']['pf'], data['gis_to_thc']['interaction_fac'])
+    plt.plot(data['GIS_to_AMOC']['pf'], data['GIS_to_AMOC']['interaction_fac'])
     plt.xlabel("PF")
     plt.ylabel(r"linear coupling/$\tau_\mathrm{GIS}$")
     plt.title("Calibration curve of GIS to AMOC")
@@ -877,7 +876,7 @@ def main():
         state_plot(snapshot_df)
 
 OVERSHOOT_PROPERTIES = ["T_lim", "T_peak", "t_conv"]
-FOLDER = r"C:\Users\lukas\Documents\PhD\numerical_data\results\intervention\2026-06-02_1"
+FOLDER = r"C:\Users\lukas\Documents\PhD\numerical_data\results\intervention\2026-06-10_1_extreme_interactions"
 if __name__ == "__main__":
     main()
 
