@@ -164,12 +164,12 @@ def calibrate_interaction(cause:str, effect:str, derivative:bool, n_interaction_
         n_intervention = 0
         for temperature in temperatures:
             for params in input_file.iterrows():
-            earth_params, cause_element, effect_element = initialize_elements(cause, effect, temperature, params)
-            interaction_strength = interaction_fac / earth_params[f"{effect}_time"]
-            if derivative:
-                interaction_strength *= earth_params[f"{cause}_time"]
-                tip_intervention = intervention_effect(cause_element, effect_element, interaction_strength, derivative)
-                n_intervention += tip_intervention
+                earth_params, cause_element, effect_element = initialize_elements(cause, effect, temperature, params)
+                interaction_strength = interaction_fac / earth_params[f"{effect}_time"]
+                if derivative:
+                    interaction_strength *= earth_params[f"{cause}_time"]
+                    tip_intervention = intervention_effect(cause_element, effect_element, interaction_strength, derivative)
+                    n_intervention += tip_intervention
         pf.append(n_intervention/total_isolated_tips)
         if n_intervention/total_isolated_tips > limit[1]:
             interaction_facs = interaction_facs[:i+1]
