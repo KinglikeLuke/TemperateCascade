@@ -86,3 +86,34 @@ class tipping_network(DiGraph):
             # elif self.get_node_types()[edge[1]]=='hopf':
             #     impact_matrix[edge[1]][edge[0]]=edge['data']
         return impact_matrix
+
+    def get_node_parameters(self):
+        """Returns all parameters of the nodes in a dictionary at time 0 for time dependent variables"""
+        node_params = {}
+        for node_id, node_data in self.nodes(data=True):
+            element = node_data['data']
+            par = element.get_par()
+            if callable(par['c']):
+                par['c'] = par['c'](0)
+            node_params[node_id] = par
+        return node_params
+
+    def get_out_strengths(self):
+        """Returns the connection strengths between nodes in a nested dict, format {from_id: {to_id: value}}"""
+        connection_strengths = {}
+        for from_id, to_id, edge_data in self.edges(data=True):
+            coupling = edge_data['data']
+            if from_id not in connection_strengths:
+                connection_strengths[from_id] = {}
+            connection_strengths[from_id][to_id] = coupling.strength
+        return connection_strengths
+
+    def get_in_strengths(self):
+        """Returns the connection strengths between nodes in a nested dict, format {to_id: {from_id: value}}"""
+        connection_strengths = {}
+        for from_id, to_id, edge_data in self.edges(data=True):
+            coupling = edge_data['data']
+            if to_id not in connection_strengths:
+                connection_strengths[to_id] = {}
+            connection_strengths[to_id][from_id] = coupling.strength
+        return connection_strengths

@@ -13,7 +13,12 @@ class coupling:
     classes."""
 
     def __init__(self):
+        self._strength = 0
         pass
+
+    @property
+    def strength(self):
+        return self._strength
 
     def dxdt_cpl(self):
         """Returns callable for the coupling term of dxdt."""

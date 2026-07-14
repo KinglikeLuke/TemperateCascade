@@ -2,6 +2,7 @@
 
 Provides classes for tipping_element objects
 """
+from numbers import Real
 
 
 class tipping_element:
@@ -85,9 +86,9 @@ class t_cusp(cusp):
     """
     def __init__(self, a, b, c):
         """Constructor with additional parameters for cusp"""
-        if isinstance(c, float):
+        if isinstance(c, Real):
             c_t = c
-            c = lambda t: c_t
+            c = lambda t, ct=c_t: ct
         super().__init__(a, b, c)
         self._type = 't_cusp'
         

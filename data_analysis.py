@@ -6,7 +6,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from numpy import dtype, ndarray
+from matplotlib.colors import LogNorm
+from numpy import dtype, ndarray, float64
 from pandas import DataFrame
 from scipy.integrate import quad
 from scipy.spatial import cKDTree
@@ -22,6 +23,8 @@ from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib import colorbar as plt_cbar
 from matplotlib import colors
+import matplotlib
+from plotly import graph_objects as go
 
 import cProfile
 
@@ -105,51 +108,22 @@ def forcing_function(T_0, mu_0, mu_1, T_lim, R):
     f = lambda t: (T_0 + y*t - (1 - np.exp(-(mu_0+mu_1*t)*t))*(y*t - (T_lim - T_0)))
     return f
 
-def calculate_clean_ticks(vmin, vmax, target_ticks=6):
-    """Calculate clean tick positions between vmin and vmax."""
+def calculate_clean_ticks(vmin, vmax, target_ticks=5):
+    """Calculate clean tick positions between vmin and vmax. Now that its hand written it actually works"""
     data_range = vmax - vmin
-
-    # Candidate step sizes (clean numbers)
-    step_candidates = [0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
-
-    # Scale candidates to appropriate magnitude
-    magnitude = 10 ** np.floor(np.log10(data_range))
-    scaled_candidates = [s * magnitude for s in step_candidates]
-    scaled_candidates.extend([s * magnitude / 10 for s in step_candidates])
-    scaled_candidates.extend([s * magnitude * 10 for s in step_candidates])
-
-    # Find step size that gives closest to target number of ticks
-    best_step = None
-    best_diff = float('inf')
-
-    for step in scaled_candidates:
-        first_tick = np.ceil(vmin / step) * step
-        last_tick = np.floor(vmax / step) * step
-        n_ticks = int(np.round((last_tick - first_tick) / step)) + 1
-
-        if 3 <= n_ticks <= 5:
-            diff = abs(n_ticks - target_ticks)
-            if diff < best_diff:
-                best_diff = diff
-                best_step = step
-
-    # Fallback if no suitable step found
-    if best_step is None:
-        best_step = data_range / (target_ticks - 1)
-
-    # Generate interior ticks
-    first_tick = np.ceil(vmin / best_step) * best_step
-    last_tick = np.floor(vmax / best_step) * best_step
-    interior_ticks = np.arange(first_tick, last_tick + best_step / 2, best_step)
-
-    # Always include exact min and max
-    all_ticks = interior_ticks
-    if abs(interior_ticks[0] - vmin) > best_step / 4:
-        all_ticks = np.concatenate([[vmin], interior_ticks])
-    if abs(interior_ticks[-1] - vmax) > best_step / 4:
-        all_ticks = np.concatenate([interior_ticks, [vmax]])
-    all_ticks = np.round(np.unique(all_ticks), 2)
-
+    acceptable_intervals = [0.1, 0.2, 0.25, 0.5, 1]
+    preferred_interval = acceptable_intervals[0]
+    for interval in acceptable_intervals:
+        if interval >= data_range:
+            break
+        if np.ceil(data_range / interval) >= target_ticks:
+            preferred_interval = interval
+    start = np.ceil(vmin / preferred_interval) * preferred_interval
+    all_ticks = np.round(np.array([vmin, *np.arange(start, vmax, preferred_interval), vmax, ]), 2)
+    if all_ticks[1] - vmin < preferred_interval/4:
+        np.delete(all_ticks, 1)
+    if vmax - all_ticks[-2] < preferred_interval / 4:
+        np.delete(all_ticks, -2)
     return all_ticks
 
 def imshow_grid(
@@ -177,7 +151,7 @@ def imshow_grid(
     vmax = max(np.max(matrix) for matrix in matrices[:nrows * ncols])
     axes = [axes] if isinstance(axes, Axes) else list(axes.flat)
 
-    diverging_map = "managua"  # shiftedColorMap(plt.cm.coolwarm, 0, 1 - vmax / (vmax + abs(vmin)), 1)
+    diverging_map = "inferno"  # shiftedColorMap(plt.cm.coolwarm, 0, 1 - vmax / (vmax + abs(vmin)), 1)
     limit = max(np.abs(vmin), np.abs(vmax))
     divnorm = colors.TwoSlopeNorm(vcenter=0, vmin=-limit, vmax=limit)
     for ax, mat, title in zip(axes, matrices, titles):
@@ -251,7 +225,7 @@ def prepare_impact_plot(impact_df, T_lim=None):
         .sort_values()
     )
     x_ticks = np.int16(np.linspace(0, len(tconv)-1, 4, endpoint=True))
-    y_ticks = np.int16(np.linspace(0, len(Tpeak)-1, 4, endpoint=True))
+    y_ticks = np.int16(np.linspace(0, len(Tpeak)-1, 5, endpoint=True))
     return {
         "matrices": matrices,
         "titles": titles,
@@ -512,18 +486,24 @@ def state_plot(state_df:pd.DataFrame):
     for component in state_df.index.get_level_values("component").unique():
         y_grid = {}
         for key in state_df.index.get_level_values("strength").unique():
-            y_component = state_df.xs((key, component), level=["strength", "component"]).to_numpy().flatten()
-            y_grid[key] = np.array([y_component[idx].mean()
-                                    for idx in neighbors])
-            print(f"{component},{key}:{np.mean(y_component)}")
+            # y_component = state_df.xs((key, component), level=["strength", "component"])#.to_numpy().flatten()
+            # y_grid[key] = np.array([y_component[idx].mean()
+            #                         for idx in neighbors])
+            if component == "total":
+                y_grid[key] = (state_df.xs((key, component), level=["strength", "component"])
+                                .groupby(OVERSHOOT_PROPERTIES).mean())
+            else:
+                y_grid[key] = ((state_df.xs((key, component), level=["strength", "component"])>0)
+                                .groupby(OVERSHOOT_PROPERTIES).mean())
+            print(f"{component},{key}:{np.mean(y_grid[key])}")
         impact_component = y_grid[1.0] - y_grid[0.0]
         impact_df = pd.DataFrame({"value": impact_component},
                                index=pd.MultiIndex.from_arrays(X_plot.T, names=OVERSHOOT_PROPERTIES))
         cfgs[component] = prepare_impact_plot(impact_df)
 
-    cfgs["titles"] = [f"{chr(97+i)}) {cfgs["totals"]["titles"][i]}" for i in range(3)]  # Look ma, I took a C course!
+    cfgs["titles"] = [f"{chr(97+i)}) {cfgs["total"]["titles"][i]}" for i in range(3)]  # Look ma, I took a C course!
     fig, axes = imshow_grid(
-        **cfgs["totals"],
+        **cfgs["total"],
         nrows=2,
         ncols=3,
         figsize=set_plot_size("article"),
@@ -537,8 +517,9 @@ def state_plot(state_df:pd.DataFrame):
     vmax = state_plots.max()
     vmin = state_plots.min()
     diverging_map = "managua"  # shiftedColorMap(plt.cm.coolwarm, 0, 1 - vmax / (vmax + abs(vmin)), 1)
-    divnorm = colors.TwoSlopeNorm(vcenter=0, vmin=-vmax, vmax=vmax)
-    for i, (ax, component) in enumerate(zip(axes[3:], )):
+    limit = np.nanmax(np.abs(state_plots[np.isfinite(state_plots)]))
+    divnorm = colors.TwoSlopeNorm(vcenter=0, vmin= - limit, vmax=limit)
+    for i, (ax, component) in enumerate(zip(axes[3:], elements)):
         im = ax.imshow(cfgs[component]["matrices"][element_Tlim_index], origin="lower", aspect="auto",
                    cmap=diverging_map, norm=divnorm)
         cfgs["titles"].append(rf"{chr(100+i)}) {component}")
@@ -549,8 +530,10 @@ def state_plot(state_df:pd.DataFrame):
     colorbar = fig.colorbar(im, ax=axes[3:])
     colorbar.set_label("Impact on element", fontsize="small")
     colorbar.ax.set_ylim(vmin - 0.03, vmax)  # cant go above b/c colorspace ends there
-    y_ticks = [np.round(vmin, 1), *np.arange(0, 0.6, 0.5), np.round(vmax, 1)]
-    colorbar.ax.set_yticks(y_ticks, y_ticks)  # get_yticks is useless as ever, so this needs to be hardcoded
+    # here be problems with rtol???
+    colorbar.ax.set_yticks(calculate_clean_ticks(vmin, vmax)[np.isfinite(calculate_clean_ticks(vmin, vmax))])
+    # y_ticks = [np.round(vmin, 1), *np.arange(0, 0.6, 0.5), np.round(vmax, 1)]
+    # colorbar.ax.set_yticks(y_ticks, y_ticks)  # get_yticks is useless as ever, so this needs to be hardcoded
 
     plot_overshoot_inset(axes[-1])
     plt.show()
@@ -559,7 +542,7 @@ def state_plot(state_df:pd.DataFrame):
 def plot_overshoot_inset(ax: Axes):
     overshoot_ax = ax.inset_axes((0.49, 0.15, 0.5, 0.5))
     overshoot_ax.patch.set_alpha(0.0)
-    inset_indicator = ax.indicate_inset((2.5, 3.5, 1, 1), inset_ax=overshoot_ax, edgecolor='k', alpha=1, lw=0.5,
+    inset_indicator = ax.indicate_inset((1.5, 1.5, 1, 1), inset_ax=overshoot_ax, edgecolor='k', alpha=1, lw=0.5,
                                               transform=ax.transData)
     for connector in inset_indicator.connectors:
         connector.set(color="w")
@@ -575,7 +558,7 @@ def lay_plot_grid(state_df: DataFrame) -> tuple[list[int] | Any, ndarray[tuple[i
     X_plot = cartesian_product(np.arange(0, 2.1, 1),
                                np.arange(2, 6.1, 1),
                                np.arange(100, 1001, 100))
-    neighbors = return_neighbors(X_plot, X_temp, radius=0.06)  # avoids taking points at other Tlims
+    neighbors = return_neighbors(X_plot, X_temp, radius=0.16)  # avoids taking points at other Tlims
     return X_plot, neighbors
 
 
@@ -749,11 +732,15 @@ def combine_cfg_matrices(cfgs, components, index):
     }
     return combined
 
-def extract_influences(state_series):
+def extract_influences(state_series, mode = "ATE"):
     interventions = state_series.index.get_level_values("intervention").unique()
     components = state_series.index.get_level_values("component").unique()
     X_plot = state_series.index.to_frame(index=False)[OVERSHOOT_PROPERTIES].drop_duplicates().to_numpy()
     influences = {}
+    if X_plot.shape[0] < 5:
+        influence_matrix = np.zeros((len(interventions), len(components), X_plot.shape[0]))
+    else:
+        influence_matrix = np.zeros((len(interventions), len(components), 1))
     for intervention in interventions:
         influences[intervention] = {}
         for component in components:
@@ -773,21 +760,44 @@ def extract_influences(state_series):
             # p_intervention = ((state_df[50000].xs((intervention, 0, intervention),
             #                                       level=["intervention", "state", "component"]) > 1)
             #                   .groupby(level=[OVERSHOOT_PROPERTIES]).mean())
-            y_component = tip - no_tip
-            ate_on_component = y_component.groupby(
-                level=[OVERSHOOT_PROPERTIES]).mean()  # np.array([y_component[idx].mean() for idx in neighbors])
+            if mode == "PF":
+                if component != "total":
+                    ate_on_component = (tip > 0).groupby(
+                    level=[OVERSHOOT_PROPERTIES]).mean() / (no_tip > 0).groupby(
+                    level=[OVERSHOOT_PROPERTIES]).mean()
+                else:
+                    ate_on_component = (tip - no_tip).groupby(
+                    level=[OVERSHOOT_PROPERTIES]).mean()
+            elif mode == "ATE":
+                if component != "total":
+                    ate_on_component = ((tip > 0).astype(int) - (no_tip > 0).astype(int)).groupby(
+                    level=[OVERSHOOT_PROPERTIES]).mean()
+                else:
+                    ate_on_component = (tip - no_tip).groupby(
+                    level=[OVERSHOOT_PROPERTIES]).mean()
+            else:
+                y_component = tip - no_tip
+                ate_on_component = y_component.groupby(
+                    level=[OVERSHOOT_PROPERTIES]).mean()  # np.array([y_component[idx].mean() for idx in neighbors])
 
             print(
                 f"ATE of {intervention} on {component}:{np.mean(ate_on_component):.2f}+-{np.std(ate_on_component):.2f}")
             impact_df = pd.DataFrame({"value": ate_on_component},
                                      index=pd.MultiIndex.from_arrays(X_plot.T, names=OVERSHOOT_PROPERTIES))
-            influences[intervention][component] = impact_df
-    return influences, X_plot
+            if len(impact_df) < 5:
+                influences[intervention][component] = impact_df
+                influence_matrix[interventions.get_loc(intervention), components.get_loc(component), :] = (
+                    impact_df.to_numpy().flatten())
+            else:
+                influences[intervention][component] = impact_df.mean()
+                influence_matrix[interventions.get_loc(intervention), components.get_loc(component), :] = (
+                    impact_df.mean().to_numpy())
+    return influences, influence_matrix, X_plot
 
 def intervention_analysis(state_df, timing_df):
     # X_plot, neighbors = lay_plot_grid(state_df)
     state_series = state_df[1000]
-    influences, _ = extract_influences(state_series)
+    influences, X_temp = extract_influences(state_series)
     for intervention in influences.keys():
         selected_components = ["AMOC", "Amazonas", "GIS", "WAIS"]
         cfgs = {}
@@ -829,33 +839,186 @@ def intervention_analysis(state_df, timing_df):
                               fontsize="medium")
     plt.show()
 
-def influence_plot(state_df):
-    state_series = state_df[1000]
-    interventions = state_series.index.get_level_values("intervention").unique()
-    components = state_series.index.get_level_values("component").unique()
-    influences, temperatures = extract_influences(state_series)
-    influence_matrix = np.zeros((len(interventions), len(components), temperatures.shape[0]))
-    for intervention in interventions:
-        for component in influences[intervention].keys():
-            influence_matrix[interventions.get_loc(intervention), components.get_loc(component), :] = (
-                influences[intervention][component].groupby(level=OVERSHOOT_PROPERTIES).mean().to_numpy().flatten())
+def plot_influence_matrix(influence_matrix: ndarray[tuple[int, int, int], dtype[float64]], components, interventions,
+                          temperatures):
+    if len(influence_matrix.shape) == 2:
+        influence_matrix = np.expand_dims(influence_matrix, axis=-1)
+        temperatures = [[temperatures]]
     for traj in range(influence_matrix.shape[-1]):
-        fig, ax = plt.subplots(figsize=set_plot_size("article"))
-        ax.imshow(influence_matrix[..., traj], origin="upper", aspect="auto", cmap="coolwarm",interpolation="none")
-        ax.set_xticks(range(len(components)), labels=components,
+        # gridspec = plt.GridSpec()
+        fig, axes = plt.subplots(1,4, width_ratios=(influence_matrix.shape[-2] - 1, 0.7, 1, 0.7),
+                                 figsize=set_plot_size("article"), layout="constrained")
+        comp_ax = axes[0] #fig.add_subplot(gridspec[0])
+        comp_cmap_ax = axes[1] #fig.add_subplot(gridspec[1])
+        total_ax = axes[2] #fig.add_subplot(gridspec[2], sharey=comp_ax)
+        total_cmap_ax = axes[3] #fig.add_subplot(gridspec[3])
+        #divnorm = colors.TwoSlopeNorm(vcenter=0)#, vmin=np.nanmin(influence_matrix[..., traj]), vmax=np.nanmax(influence_matrix[..., traj])) # min is typically nan
+        component_heatmap = comp_ax.imshow(influence_matrix[:, :-1, traj], origin="upper", aspect="equal",
+                                           cmap="seismic", interpolation="none",
+                                           norm=colors.SymLogNorm(linthresh=0.015, vmin=-1, vmax=1, base=10))
+        comp_ax.set_xticks(range(len(components)-1), labels=components[:-1],
                       rotation=45, ha="right", rotation_mode="anchor")
-        ax.set_yticks(range(len(interventions)), labels=interventions)
-        ax.set_title(f"T={temperatures[traj][0]}°C", fontsize='medium')
+        comp_ax.set_yticks(range(len(interventions)), labels=interventions)
+        vmax = np.max(influence_matrix[:, [-1], traj])
+        vmin = np.min(influence_matrix[:, [-1], traj])
+        total_heatmap = total_ax.imshow(influence_matrix[:, [-1],  traj], origin="upper", aspect="equal",
+                                        cmap="bwr", interpolation="none",
+                                        norm = colors.TwoSlopeNorm(vcenter=0, vmin=-vmax, vmax=vmax))
+        total_ax.set_xticks([0], labels=["total"],rotation=45, ha="right", rotation_mode="anchor")
+        plt.setp(total_ax.get_yticklabels(), visible=False)
+        fig.suptitle(f"ATE at T={temperatures[traj][0]}°C", fontsize='medium')
+        comp_cbar = fig.colorbar(component_heatmap, cax=comp_cmap_ax)
+        comp_min = np.min(influence_matrix[:, :-1, traj])
+        comp_max = np.max(influence_matrix[:, :-1, traj])
+        comp_cbar.ax.set_ylim(comp_min - 0.03, comp_max)
+        comp_cbar.ax.set_yticks([comp_min, -0.1,  0, 0.1, comp_max])
+        comp_cmap_ax.get_yaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+        total_colorbar = fig.colorbar(total_heatmap, cax=total_cmap_ax)
+        total_colorbar.ax.set_ylim(vmin - 0.03, vmax)
+        #fig.tight_layout()
+        fig.savefig(fr"C:\Users\lukas\Documents\PhD\numerical_data\analysis_results\Causal Effect\{temperatures[traj][0]}infmatr50ka.png")
     plt.show()
 
+def intervention_matrix(state_df):
+    state_series = (state_df[50000]
+                    .xs(1.0, level="strength")
+                    .drop(["NINO", "REEF"], level="component")
+                    .drop(["REEF"], level="intervention"))
+    components = state_series.index.get_level_values("component").unique()
+    interventions = state_series.index.get_level_values("intervention").unique()
+    influences, influence_matrix, temperatures = extract_influences(state_series, mode="ATE")
+    # maybe as a rework of extract_influences
+    # shape = [len(level) for level in no_influence.index.levels]
+    # no_influence_matrix = no_influence.to_numpy().reshape(shape)
+    plot_influence_matrix(influence_matrix, components, interventions, temperatures)
+
+
+
+
+def network_effects(state_df):
+    interventions = state_df.index.get_level_values("intervention").unique()
+    components = state_df.index.get_level_values("component").unique()
+    # batch contents randomly for histogram ordered by intervention -> component
+    # n = 200
+    # no_intervention_tip = ((state_series.xs(-1.0, level="state")  > 0).unstack(level=["intervention", "component"]))
+    # ni_batched  = no_intervention.astype(int)#.groupby(np.arange(len(no_intervention_shuffle)) // n).mean()
+
+    # the pf should at least be calculated on the same sample
+    # intervention_tip = ((state_series.xs(1.0, level="state")  > 0).unstack(level=["intervention", "component"]))
+    # i_batched  = intervention_shuffle.astype(int)#.groupby(np.arange(len(intervention_shuffle)) // n).mean()
+
+    state_series = state_df[50000].drop(labels="NINO", level="component")#.xs(strength, level="strength")
+    tip_series = state_series > 0
+    fig, axes = plt.subplots(nrows=3, ncols=2, sharex=True, sharey=True,
+                             figsize=set_plot_size("article", fraction=1, subplots=(3, 2)))
+        # fig.suptitle(f"{"Network" if strength == 1 else "Pairwise"} effects of {intervention} ", fontsize="medium")
+    interesting_combinations = [("GIS", "AMOC"), ("WAIS", "AMOC"), ("AMOC", "WAIS")]
+    rows = []
+    for ax_i, (intervention, component) in enumerate(interesting_combinations):
+        for strength in [0.0, 1.0]:
+            ax = axes[ax_i, int(strength)]
+            component_series = tip_series.xs((intervention, component, strength),
+                                             level=["intervention", "component", "strength"])
+            nti_series = component_series.xs(-1, level="state")
+            ti_series = component_series.xs(1, level="state")
+            p00 = np.mean(~nti_series & ~ti_series)
+            p01 = np.mean(~nti_series & ti_series)
+            p10 = np.mean(nti_series & ~ti_series)
+            p11 = np.mean(nti_series & ti_series)
+            M = np.array([[p00, p01], [p10, p11]])
+            ax.imshow(M, cmap="plasma", vmin=0, vmax=1) #, origin="upper", aspect="auto", cmap="magma", interpolation="none")
+            ax.set_xticks(np.arange(2), labels=[f"$Y_1=0$", f"$Y_1=1$"], fontsize='small')
+            ax.set_yticks(np.arange(2), labels=[f"$Y_0=0$", f"$Y_0=1$"], rotation=45, fontsize='small')
+            for i in range(2):
+                for j in range(2):
+                    ax.text(
+                        j,
+                        i,
+                        fr"{100*M[i, j]:.0f}\%",
+                        ha="center",
+                        va="center"
+                    )
+            # Add quadrant annotations for top right plot
+            if ax_i == 0 and strength == 1.0:
+                arrow_props = dict(arrowstyle='->', lw=0.8, color='black')
+                # Top right: destabilizing
+                ax.annotate('destabilized', xy=(1, 0.3), xytext=(1.7, 0.3),
+                            arrowprops=arrow_props, fontsize='x-small', ha='left')
+                # Bottom right: tips always
+                ax.annotate('tips always', xy=(1, 1.3), xytext=(1.7, 1.3),
+                            arrowprops=arrow_props, fontsize='x-small', ha='left')
+                # Bottom left: stabilizing
+                ax.annotate('stabilized', xy=(0, 1.3), xytext=(-0.7, 1.3),
+                            arrowprops=arrow_props, fontsize='x-small', ha='right')
+                # Top left: always stable
+                ax.annotate('always stable', xy=(0, 0.3), xytext=(-0.7, 0.3),
+                            arrowprops=arrow_props, fontsize='x-small', ha='right')
+            if component == "AMOC" and intervention == "WAIS" and strength == 1:
+                fig = go.Figure(
+                    go.Sankey(
+                        node=dict(
+                            pad=30,
+                            thickness=20,
+                            label=[
+                                f"{component} stable when {intervention} stable (Y_0=0)",
+                                f"{component} tips when {intervention} stable (Y_0=1)",
+                                f"{component} stable when {intervention} tips (Y_1=0)",
+                                f"{component} tips when {intervention} tips (Y_1=1)",
+                            ],
+                        ),
+                        link=dict(
+                            source=[0, 0, 1, 1],
+                            target=[2, 3, 2, 3],
+                            value=[p00, p01, p10, p11],
+                        ),
+                    )
+                )
+
+                fig.update_layout(
+                    title="Intervention transition structure",
+                    font_size=14,
+                )
+                # fig.write_image(fr"C:\Users\lukas\Documents\PhD\numerical_data\analysis_results\Causal Effect\intervention_transition_structure.jpg")
+                fig.show()
+        rows.append(f"{intervention} on {component}")
+    pad = 5  # in points
+    cols = ["Pairwise Effect", "Network Effect"]
+    for ax, col in zip(axes[0], cols):
+        ax.annotate(col, xy=(0.5, 1), xytext=(0, pad),
+                    xycoords='axes fraction', textcoords='offset points',
+                    size='small', ha='center', va='baseline')
+
+    for ax, row in zip(axes[:, 0], rows):
+        ax.annotate(row, xy=(0, 0.5), xytext=(-ax.yaxis.labelpad + pad, 0),
+                    xycoords=ax.yaxis.label, textcoords='offset points',
+                    size='small', ha='right', va='center', rotation="vertical")
+    
+    plt.tight_layout()
+            #fig.subplots_adjust(left=0.15, top=0.95)
+        # axes = network_pf[intervention].drop(columns=[intervention, "total", "REEF"]).hist(figsize=set_plot_size("article"), bins=3)
+        # fig = axes.ravel()[0].get_figure()
+        # fig.suptitle(f"Effects of {intervention} tipping on network", fontsize="medium")
+    plt.show()
+    # hack: to get to PF, I don't want to subtract the no_tip proportion
+    # no_influence, no_influence_matrix, temperatures = extract_influences(state_series.xs(0.0, level="strength"), tip_probablility=True)
+    # influences_high, influence_matrix, _ = extract_influences(state_series.xs(1.0, level="strength"), tip_probablility=True)
+    # plot_influence_matrix(influence_matrix / no_influence_matrix, components, interventions, "all")
 
 
 def plot_pf_calibration():
     data = pd.read_csv("interaction_calibration.csv", header=[0, 1], index_col=0)
-    plt.plot(data['GIS_to_AMOC']['pf'], data['GIS_to_AMOC']['interaction_fac'])
-    plt.xlabel("PF")
-    plt.ylabel(r"linear coupling/$\tau_\mathrm{GIS}$")
-    plt.title("Calibration curve of GIS to AMOC")
+    fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=set_plot_size("article", fraction=1,
+                                                                           subplots=(1, 2)))
+    ax1.plot(data['GIS_to_AMOC']['pf'], data['GIS_to_AMOC']['interaction_fac'])
+    ax1.set_xlabel("Probability factor")
+    ax1.set_ylabel(r"Derivative coupling/$\tau_\mathrm{GIS}$")
+    ax1.set_title("GIS to AMOC")
+
+    ax2.plot(data['GIS_to_WAIS']['pf'], data['GIS_to_WAIS']['interaction_fac'])
+    ax2.set_xlabel("Probability factor")
+    ax2.set_ylabel(r"Linear coupling")
+    ax2.set_title("GIS to WAIS")
+    fig.suptitle("Calibration of interaction factors")
     plt.show()
 
 def main():
@@ -866,17 +1029,18 @@ def main():
     timing_df = load_longform_df(fr"{FOLDER}\timing_dataframe.csv")
     if "nino_state" in timing_df.columns:
         timing_df.drop(columns = "nino_state", inplace=True) # preliminary
-    state_df = load_longform_df(fr"{FOLDER}\dataframe.csv")
-    for keyword, timeframe in timeframes.items():
-        # intervention_analysis(state_df, timing_df)
-        influence_plot(state_df)
-        snapshot_df = state_df[timeframe]
-        snapshot_df.name = "value"
-        # snapshot_df = pd.concat([snapshot_df, max_chain_df]).sort_index()
-        state_plot(snapshot_df)
+    plot_pf_calibration()
+    # state_df = load_longform_df(fr"{FOLDER}\dataframe.csv")
+    # intervention_analysis(state_df, timing_df)
+    # intervention_matrix(state_df)
+    # network_effects(state_df)
+    # snapshot_df = state_df[50_000]
+    # snapshot_df.name = "value"
+    # # snapshot_df = pd.concat([snapshot_df, max_chain_df]).sort_index()
+    # state_plot(snapshot_df)
 
 OVERSHOOT_PROPERTIES = ["T_lim", "T_peak", "t_conv"]
-FOLDER = r"C:\Users\lukas\Documents\PhD\numerical_data\results\intervention\2026-06-10_1_extreme_interactions"
+FOLDER = r"C:\Users\lukas\Documents\PhD\numerical_data\results\strengths\2026-06-28_1"
 if __name__ == "__main__":
     main()
 

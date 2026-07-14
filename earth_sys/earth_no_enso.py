@@ -79,8 +79,10 @@ def earth_network(e_p: dict, temp, strength, kk0, kk1, kk2):
     net = tipping_network()
     nodes = {}
     for t_e in ["GIS", "AMOC", "WAIS", "Amazonas", "REEF", "AWSI", "PERM", "WAM"]:
+        # Fucking lambda only saves the reference to t_e, which would then take the last value of t_e, "WAM", for
+        # every node. Hence, I have to pass the t_e variable explicitly in the default values.
         nodes[t_e] = t_cusp(a=-1.0 / e_p[f"{t_e}_time"], b=1.0 / e_p[f"{t_e}_time"],
-                      c=lambda t: (1.0 / e_p[f"{t_e}_time"]) * global_functions.CUSPc(0., e_p[f"limits_{t_e}"], temp(t)))
+                      c=lambda t, te = t_e: (1.0 / e_p[f"{te}_time"]) * global_functions.CUSPc(0., e_p[f"limits_{te}"], temp(t)))
     nodes["NINO"] = linear(a=-1 / e_p['NINO_time'],
                   c=lambda t: (1.0 / e_p['NINO_time']) * global_functions.CUSPc(0., e_p['limits_NINO'], temp(t)), x_0=-1.0)
     for node in nodes.values():

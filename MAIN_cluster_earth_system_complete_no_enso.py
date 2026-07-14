@@ -46,7 +46,7 @@ plus_minus_include = True    # from Kriegler, 2009: Unclear links; if False all 
 DURATION = 50000 #actual real simulation years
 N_STEPS = 1000
 T_0 = 1.0
-N_OVERSHOOTS = 400
+N_OVERSHOOTS = 200
 #Names to create the respective directories
 long_save_name = "../numerical_data/results"
 limit_filename = r"start_ensemble\limits.json"
@@ -116,9 +116,9 @@ def model_strengths():
     tipping_df = pd.DataFrame({}, index=index)
     timing_df = pd.DataFrame({"tip_time": pd.Series(dtype="float64")}, index=index)
 
-    for i, sys_var in tqdm(input_file.iterrows()):
+    for i, sys_var in enumerate(tqdm(input_file.iterrows(), total=input_file.shape[0])):
         conv_fac_gis, earth_params = prepare_earth_params(sys_var)
-        T_0s, T_lims, T_peaks, t_convs = prepare_overshoots()
+        T_0s, T_lims, T_peaks, t_convs = prepare_overshoots(mode = "grid")
         state_output = {}
         timing_output = {}
         T_index = 0
@@ -200,7 +200,7 @@ def model_interventions():
     Returns:
 
     """
-    interventions = COMPONENTS[:3] # Amazonas has no outgoing connections, therefore cannot have a causal effect
+    interventions = COMPONENTS[:-1] # Amazonas has no outgoing connections. Therefore, it cannot have a causal effect
     intervention_states = [-1, 0, 1]
     folder = prepare_folder("intervention")
 
@@ -211,7 +211,7 @@ def model_interventions():
     tipping_df = pd.DataFrame({}, index=index)
     timing_df = pd.DataFrame({}, index=index)
 
-    T_0s, T_lims, T_peaks, t_convs = prepare_overshoots(random=False, scenario="flat")
+    T_0s, T_lims, T_peaks, t_convs = prepare_overshoots(mode = "flat")
     for i, sys_var in enumerate(tqdm(input_file.iterrows(), total=input_file.shape[0])):
         conv_fac_gis, earth_params = prepare_earth_params(sys_var)
 
@@ -232,9 +232,15 @@ def model_interventions():
             for j, intv_element in enumerate(interventions):
                 for k, intv_state in enumerate(intervention_states):
                     for intv_con_strength in (0, 1):
-                        for key in LIMITS.keys():
-                            if key.startswith(f"pf_{intv_element}"):
-                                earth_params[key] = LIMITS[key][intv_con_strength]
+                        earth_params_original = earth_params.copy()
+                        # for key in LIMITS.keys():
+                        #     if key.startswith(f"pf_") and not key.startswith(f"pf_{intv_element}"):
+                        #         # 0 means isolated interaction (PF of 1 everywhere but intervention),
+                        #         # 1 means normal (maximally strong) interaction
+                        #         if intv_con_strength == 0:
+                        #             earth_params[key] = 1
+                        #         # else
+                        #         #   earth_params[key] = LIMITS[key][np.argmax(np.abs(np.array(LIMITS[key]) - 1))]
                         # scale the temperature properly
                         forcing = lambda t: forcing_function(T_0_iter, mu_0, mu_1, T_lim, R)(t * conv_fac_gis)
                         net, node_dict = earth_network(earth_params, forcing, strength=1, kk0=1, kk1=1, kk2=1)
@@ -253,6 +259,7 @@ def model_interventions():
                                 = tip_times[l]
                         state_output[i, T_peak, T_lim, t_conv, intv_element, intv_state, intv_con_strength, "total"] \
                             = state_results[-1]
+                        earth_params = earth_params_original
 
             # state_output.append(state_record) # shape: temp_dim x interventions x components x time
             # timing_output.append(timing_record) # shape: temp_dim x interventions x components
@@ -286,15 +293,23 @@ def simulate_network(net, initial_state, conv_fac_gis):
     return state_results, tip_times
 
 
-def prepare_overshoots(random=True, scenario=None):
-    if scenario == "flat":
+def prepare_overshoots(mode="random"):
+    """
+    Prepares parameters for the overshoots.
+    Args:
+        mode: str, "flat" or "random", fallback: "grid"
+
+    Returns:
+
+    """
+    if mode == "flat":
         # Scenario with T_lims and T_peaks at 1.5, 2, 2.5 and t_convs at 0
         # T_0 varies in lockstep with T_lim and T_peak for flat trajectories
         T_0s = np.array([1.5, 2.0, 2.5])
         T_peaks = np.array([1.5, 2.0, 2.5])
         T_lims = np.array([1.5, 2.0, 2.5])
         t_convs = np.array([0.0, 0.0, 0.0])
-    elif random:
+    elif mode == "random":
         lhc_distr = np.array(lhs(3, samples=N_OVERSHOOTS))
         T_peaks = np.round(4 * lhc_distr[:, 0] + 2, 2)
         # T_lims = np.round(2*lhc_distr[:,1], 2)
@@ -360,7 +375,7 @@ def timing_results_to_df(timing_output, timing_df):
         new_timing_df.index,
         names=timing_df.index.names
     )
-    timing_df = pd.concat([timing_df, new_timing_df], axis=1)
+    timing_df = pd.concat([timing_df, new_timing_df])
     return timing_df
 
 
@@ -375,7 +390,7 @@ def state_results_to_df(state_output, tipping_df):
         new_tipping_df.index,
         names=tipping_df.index.names
     )
-    tipping_df = pd.concat([tipping_df, new_tipping_df], axis=1)
+    tipping_df = pd.concat([tipping_df, new_tipping_df])
     return tipping_df
 
 def make_state_index(i, T_lims, T_peaks,  t_convs, tipping_df, components, **index_levels):
@@ -418,7 +433,7 @@ def rename_characteristic(temperature_trajs,):
 
 DEBUGGING_MODE = sys.monitoring.get_tool(sys.monitoring.DEBUGGER_ID) is not None
 if __name__ == "__main__":
-    model_interventions()
+    model_strengths()
 # Good lord
 # The original Code steps in 0.1 (absolute? idk) year steps through the solver (because the stepsize is far greater than the calibrated(?) t_end)
 # However, it takes its Temperature curve as if it made 1 year steps (every step a new year)
