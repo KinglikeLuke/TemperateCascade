@@ -1,28 +1,23 @@
-import sys
 import json
 from typing import Any
 
 # global imports
 import numpy as np
 from scipy.integrate import solve_ivp
-from scipy.optimize import curve_fit
-from scipy.interpolate import interpolate
-from dataclasses import dataclass
 import pandas as pd
-import matplotlib.pyplot as plt
-from overshoot_trajectory import fit_parameters, overshoot_trajectory
+from temp_input.overshoot_trajectory import fit_parameters, overshoot_trajectory
 from pydoe import lhs
 import tqdm
 
 # PyCascades imports
 from core.coupling import linear_coupling, cusp_derivative_coupling
-from core.tipping_element import t_cusp, linear, state_intervention, derivative_intervention, tipping_element
+from core.tipping_element import t_cusp, state_intervention, derivative_intervention, tipping_element
 from core.tipping_network import tipping_network
 from earth_sys.functions_earth_system_no_enso import global_functions
 
 
-input_file = pd.read_csv(r"start_ensemble\latin_prob_calibration.txt", delimiter=",")
-limit_filename = r"start_ensemble\limits.json"
+input_file = pd.read_csv(r"../start_ensemble/latin_prob_calibration.txt", delimiter=",")
+limit_filename = r"../start_ensemble/limits.json"
 with open(limit_filename, "r") as file:
     LIMITS = json.load(file)
 
