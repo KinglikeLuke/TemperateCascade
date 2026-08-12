@@ -329,7 +329,7 @@ def prepare_earth_params(sys_var):
         # function call for absolute timing and time conversion
         time_props = timing(earth_params_raw)
         earth_params = time_props.timescales()
-        conv_fac_gis = time_props.conversion()
+        conv_fac_gis = 1 # time_props.conversion()
     else:
         # no time scales included
         earth_params = earth_params_raw
