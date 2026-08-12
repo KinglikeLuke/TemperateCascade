@@ -8,7 +8,7 @@ import copy
 
 import numpy as np
 from scipy.integrate import solve_ivp
-from core.tipping_element import cusp
+from core.tipping_element import cusp, t_cusp
 from core.tipping_network import tipping_network
 from core.coupling import linear_coupling
 from core.evolve import evolve
@@ -40,6 +40,14 @@ class timing():
     Here we insert tipping time scales at a temperature around 4°C above pre-industrial, since time scales are shifting during simulation due to structure of CUSP-catastrophe
     """
     def timescales(self):
+        # e_p = self.earth_params
+        # for t_e in ["GIS", "AMOC", "WAIS", "Amazonas", "REEF", "AWSI", "PERM", "WAM"]:
+        #     # Fucking lambda only saves the reference to t_e, which would then take the last value of t_e, "WAM", for
+        #     # every node. Hence, I have to pass the t_e variable explicitly in the default values.
+        #     network = tipping_network().add_element(t_cusp(a=-1.0 / e_p[f"{t_e}_time"], b=1.0 / e_p[f"{t_e}_time"],
+        #                         c=(1.0 / e_p[f"{t_e}_time"]) * global_functions.CUSPc(0., e_p[
+        #                             f"limits_{t_e}"], e_p[f"limits_{t_e}"])))
+
         new_params = copy.deepcopy(self.earth_params)
         for key in new_params.keys():
             if key.endswith('time'):
@@ -56,19 +64,33 @@ class timing():
         net.add_element(cusp_deq)
         cusp_deq._par['c'] = self._c_krit/self._timescale + self._epsilon_c/self._timescale
 
-        timestep = 0.01
-        t_end = 5000
-        t_arr = np.arange(0, t_end, timestep)
-        sol = solve_ivp( net.f , (0, t_end), self._initial_state, t_eval=t_arr, jac=net.jac, method='LSODA')
-        sol = sol.y.T
-        cusp_deq = sol[:, 0]
+        # Define event function to detect threshold crossing
+        def threshold_event(t, y):
+            """Event occurs when state crosses threshold"""
+            return y[0] - self._threshold
 
-        # find point where state crosses threshold
-        th = cusp_deq > self._threshold
-        th[1:][th[:-1] & th[1:]] = False
+        threshold_event.terminal = True  # Stop integration when event occurs
+        threshold_event.direction = 1  # Only detect crossing from below
+
+        t_end = 5000
+        sol = solve_ivp(
+            net.f,
+            (0, t_end),
+            self._initial_state,
+            events=threshold_event,
+            jac=net.jac,
+            method='LSODA',
+            dense_output=True  # Enable if you need solution interpolation
+        )
+
+        # Get time when threshold was crossed
+        if len(sol.t_events[0]) > 0:
+            t_cross = sol.t_events[0][0]
+        else:
+            raise ValueError("Threshold was not crossed within simulation time")
 
         # conversion factor from arbitrary units to years
-        conv_fac = self._real_timescale / t_arr[np.nonzero(th)[0][0]]
+        conv_fac = self._real_timescale / t_cross
         return conv_fac
 
 

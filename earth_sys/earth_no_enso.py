@@ -28,7 +28,7 @@ Here the Earth system network is defined after Kriegler et al., 2009
     #     params['df_wais_to_thc'] = 0.7109571 * params['pf_wais_to_thc'] + 0.94770077
     # return params
 
-calibration_df = pd.read_csv("interaction_calibration.csv", header=[0, 1], index_col=0)
+calibration_df = pd.read_csv(r"calibrations\interaction_calibration.csv", header=[0, 1], index_col=0)
 COMPONENTS = ["GIS", "AMOC", "WAIS", "Amazonas", "REEF", "AWSI", "PERM", "WAM", "NINO"]
 
 def pf_to_interaction(earth_params, name):

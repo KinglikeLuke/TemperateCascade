@@ -2,16 +2,12 @@
 import os
 import sys
 import re
-import time
 import json
-
-from core.tipping_element import state_intervention
 
 sys.path.append('')
 
 # global imports
 import numpy as np
-import matplotlib
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import seaborn as sns
@@ -20,22 +16,18 @@ import itertools
 import datetime
 import glob
 # from PyPDF2 import PdfMerger # dont really know what I would want with the merged PDFs 
-from netCDF4 import Dataset
-import cProfile
 from scipy.integrate import solve_ivp, quad
 from tqdm import tqdm
 import pandas as pd
 from pydoe import lhs
 
 # private imports from sys.path
-from core.evolve import evolve
 
 #private imports for earth system
 from earth_sys.timing_no_enso import timing
-from earth_sys.functions_earth_system_no_enso import global_functions
 from earth_sys.earth_no_enso import earth_network, intervene_in_network
 
-from overshoot_trajectory import overshoot_trajectory, fit_parameters
+from temp_input.overshoot_trajectory import overshoot_trajectory, fit_parameters
 
 #measure time
 #start = time.time()
@@ -233,14 +225,14 @@ def model_interventions():
                 for k, intv_state in enumerate(intervention_states):
                     for intv_con_strength in (0, 1):
                         earth_params_original = earth_params.copy()
-                        # for key in LIMITS.keys():
-                        #     if key.startswith(f"pf_") and not key.startswith(f"pf_{intv_element}"):
-                        #         # 0 means isolated interaction (PF of 1 everywhere but intervention),
-                        #         # 1 means normal (maximally strong) interaction
-                        #         if intv_con_strength == 0:
-                        #             earth_params[key] = 1
-                        #         # else
-                        #         #   earth_params[key] = LIMITS[key][np.argmax(np.abs(np.array(LIMITS[key]) - 1))]
+                        for key in LIMITS.keys():
+                            if key.startswith(f"pf_") and not key.startswith(f"pf_{intv_element}"):
+                                # 0 means isolated interaction (PF of 1 everywhere but intervention),
+                                # 1 means normal (maximally strong) interaction
+                                if intv_con_strength == 0:
+                                    earth_params[key] = 1
+                                # else
+                                #   earth_params[key] = LIMITS[key][np.argmax(np.abs(np.array(LIMITS[key]) - 1))]
                         # scale the temperature properly
                         forcing = lambda t: forcing_function(T_0_iter, mu_0, mu_1, T_lim, R)(t * conv_fac_gis)
                         net, node_dict = earth_network(earth_params, forcing, strength=1, kk0=1, kk1=1, kk2=1)
@@ -433,7 +425,7 @@ def rename_characteristic(temperature_trajs,):
 
 DEBUGGING_MODE = sys.monitoring.get_tool(sys.monitoring.DEBUGGER_ID) is not None
 if __name__ == "__main__":
-    model_strengths()
+    model_interventions()
 # Good lord
 # The original Code steps in 0.1 (absolute? idk) year steps through the solver (because the stepsize is far greater than the calibrated(?) t_end)
 # However, it takes its Temperature curve as if it made 1 year steps (every step a new year)
