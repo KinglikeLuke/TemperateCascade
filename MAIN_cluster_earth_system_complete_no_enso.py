@@ -24,7 +24,7 @@ from pydoe import lhs
 # private imports from sys.path
 
 #private imports for earth system
-from earth_sys.timing_no_enso import timing
+from earth_sys.timing_no_enso import individual_timescales
 from earth_sys.earth_no_enso import earth_network, intervene_in_network
 
 from temp_input.overshoot_trajectory import overshoot_trajectory, fit_parameters
@@ -324,12 +324,11 @@ def prepare_earth_params(sys_var):
     earth_params_raw = sys_var[1].to_dict()
 
     # Time scale
-    if time_scale == True:
+    if time_scale:
         # print("compute calibration timescale")
         # function call for absolute timing and time conversion
-        time_props = timing(earth_params_raw)
-        earth_params = time_props.timescales()
-        conv_fac_gis = 1 # time_props.conversion()
+        earth_params = individual_timescales(earth_params_raw)
+        conv_fac_gis = 1.0
     else:
         # no time scales included
         earth_params = earth_params_raw

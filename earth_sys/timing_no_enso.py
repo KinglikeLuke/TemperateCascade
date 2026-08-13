@@ -15,9 +15,65 @@ from core.evolve import evolve
 from earth_sys.functions_earth_system_no_enso import global_functions
 
 
+def individual_timescales(earth_params, temp_offset=2.0):
+    """Calibrate absolute internal timescales for the sampled tipping times.
 
-class timing():
+    For a fixed calibration temperature, the isolated cusp element has the form
+    dx/dt = F(x, T) / tau. Therefore its threshold-crossing time is exactly
+    linear in tau. We only need one simulation per element with tau = 1, then
+    set tau = sampled_tipping_time / base_crossing_time.
+    """
+    new_params = copy.deepcopy(earth_params)
+    elements = ["GIS", "AMOC", "WAIS", "Amazonas", "REEF", "AWSI", "PERM", "WAM"]
+    threshold = 1.0
+    initial_state = [-1.0]
 
+    def threshold_event(t, y):
+        return y[0] - threshold
+
+    threshold_event.terminal = True
+    threshold_event.direction = 1
+
+    def base_tipping_time(element):
+        limit_key = f"limits_{element}"
+        if limit_key not in earth_params:
+            raise KeyError(f"Missing required earth parameter: {limit_key}")
+
+        limit_temp = earth_params[limit_key]
+        calibration_temp = limit_temp + temp_offset
+        net = tipping_network()
+        net.add_element(cusp(
+            a=-1.0,
+            b=1.0,
+            c=global_functions.CUSPc(0., limit_temp, calibration_temp)
+        ))
+
+        sol = solve_ivp(
+            net.f,
+            (0, 1000000),
+            initial_state,
+            events=threshold_event,
+            jac=net.jac,
+            method='LSODA'
+        )
+        if len(sol.t_events[0]) == 0:
+            raise ValueError(
+                f"{element} did not cross {threshold} at "
+                f"{calibration_temp}C within the calibration window"
+            )
+        return sol.t_events[0][0]
+
+    for element in elements:
+        time_key = f"{element}_time"
+        if time_key not in earth_params:
+            raise KeyError(f"Missing required earth parameter: {time_key}")
+        new_params[time_key] = earth_params[time_key] / base_tipping_time(element)
+
+    # NINO is a linear relaxation element in earth_network, so its sampled
+    # absolute time is already on the same year-based axis.
+    return new_params
+
+class Timing:
     def __init__(self, earth_params: dict):
         #Timescales
         self.earth_params = earth_params
