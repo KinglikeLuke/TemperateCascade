@@ -3,7 +3,8 @@
 Provides classes for tipping_element objects
 """
 from numbers import Real
-
+import numpy as np
+from earth_sys.functions_earth_system_no_enso import global_functions
 
 class tipping_element:
     """Abstract tipping_element class
@@ -86,16 +87,16 @@ class t_cusp(cusp):
     """
     def __init__(self, a, b, c):
         """Constructor with additional parameters for cusp"""
-        if isinstance(c, Real):
-            c_t = c
-            c = lambda t, ct=c_t: ct
         super().__init__(a, b, c)
         self._type = 't_cusp'
-        
+
+    @property
+    def c(self):
+        return self._par['c']
+
     def dxdt_diag(self):
         """returns callable of dx/dt diagonal element of cusp"""
-        return lambda t, x : self._par['a'] * pow(x,3) + self._par['b'] * x \
-                                                       + self._par['c'](t)
+        return lambda t, x : self._par['a'] * pow(x,3) + self._par['b'] * x + self._par['c'](t)
                                                        
 class linear(tipping_element):
     def __init__(self, a, c, x_0):
@@ -108,11 +109,15 @@ class linear(tipping_element):
 
     def dxdt_diag(self):
         """returns callable of dx/dt diagonal element of cusp"""
-        return lambda t, x : self._par['a'] * (x - self._par['x_0']) + self._par['c'](t) 
+        return lambda t, x : self._par['a'] * (x - self._par['x_0']) + self._par['c'](t)
 
     def jac_diag(self):
         """returns callable jacobian diagonal element of cusp."""
         return lambda t, x : self._par['a']
+
+    @property
+    def c(self):
+        return self._par['c']
 
     def tip_state(self):
         return lambda x: x > 0

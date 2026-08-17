@@ -25,7 +25,7 @@ from pydoe import lhs
 
 #private imports for earth system
 from earth_sys.timing_no_enso import individual_timescales
-from earth_sys.earth_no_enso import earth_network, intervene_in_network
+from earth_sys.earth_no_enso import earth_network, earth_elements, intervene_in_network
 
 from temp_input.overshoot_trajectory import overshoot_trajectory, fit_parameters
 

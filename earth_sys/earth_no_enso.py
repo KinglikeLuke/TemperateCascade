@@ -1,5 +1,7 @@
 # Add modules directory to path
 import sys
+from typing import Any
+from numbers import Real
 
 sys.path.append('')
 
@@ -76,19 +78,7 @@ def earth_network(e_p: dict, temp, strength, kk0, kk1, kk2):
     kk0, kk1, kk2: integers -1, 0, or +1 controlling optional couplings
     """
     # set up network
-    net = tipping_network()
-    nodes = {}
-    for t_e in ["GIS", "AMOC", "WAIS", "Amazonas", "REEF", "AWSI", "PERM", "WAM"]:
-        # Fucking lambda only saves the reference to t_e, which would then take the last value of t_e, "WAM", for
-        # every node. Hence, I have to pass the t_e variable explicitly in the default values.
-        nodes[t_e] = t_cusp(a=-1.0 / e_p[f"{t_e}_time"], b=1.0 / e_p[f"{t_e}_time"],
-                      c=lambda t, te = t_e: (1.0 / e_p[f"{te}_time"]) * global_functions.CUSPc(0., e_p[f"limits_{te}"], temp(t)))
-    nodes["NINO"] = linear(a=-1 / e_p['NINO_time'],
-                  c=lambda t: (1.0 / e_p['NINO_time']) * global_functions.CUSPc(0., e_p['limits_NINO'], temp(t)), x_0=-1.0)
-    for node in nodes.values():
-        net.add_element(node)
-    # Dicts preserve order since 3.7
-    node_dict = {component: i for i, component in enumerate(COMPONENTS)}
+    net, node_dict, nodes = earth_elements(e_p, temp)
     ######################################Set edges to active state#####################################
     net.add_coupling(1, 0, linear_coupling(strength=(1.0 / e_p['GIS_time']) * strength * pf_to_interaction(e_p, 'pf_AMOC_to_GIS'), x_0=-1))
     net.add_coupling(2, 0, linear_coupling(strength=(1.0 / e_p['GIS_time']) * strength * pf_to_interaction(e_p, 'pf_WAIS_to_GIS'), x_0=-1))
@@ -120,3 +110,25 @@ def earth_network(e_p: dict, temp, strength, kk0, kk1, kk2):
     net.add_coupling(8, 4, linear_coupling(strength=(1.0 / e_p['REEF_time']) * strength * pf_to_interaction(e_p, 'pf_NINO_to_REEF'), x_0=-1))
     net.add_coupling(6, 1, linear_coupling(strength=(1.0 / e_p['AMOC_time']) * strength * pf_to_interaction(e_p, 'pf_PERM_to_AMOC'), x_0=-1))
     return net, node_dict
+
+def earth_elements(e_p: dict, temp) -> tuple[tipping_network, dict[Any, Any], dict[str, int]]:
+    net = tipping_network()
+    if isinstance(temp, Real):
+        temp = lambda t, tem=temp: tem
+    nodes = {}
+    for t_e in ["GIS", "AMOC", "WAIS", "Amazonas", "REEF", "WAM"]:
+        # Fucking lambda only saves the reference to t_e, which would then take the last value of t_e, "WAM", for
+        # every node. Hence, I have to pass the t_e variable explicitly in the default values.
+        nodes[t_e] = t_cusp(a=-1.0 / e_p[f"{t_e}_time"], b=1.0 / e_p[f"{t_e}_time"],
+                            c=global_functions.CUSP(e_p[f"{t_e}_time"], 0, e_p[f"limits_{t_e}"], temp))
+
+    for t_e in ["AWSI", "PERM", "NINO"]:
+        nodes[t_e] = t_cusp(a=-1.0 / e_p[f"{t_e}_time"], b=-1.0 / e_p[f"{t_e}_time"],
+                            c=global_functions.CUSP(e_p[f"{t_e}_time"], e_p[f"limits_{t_e}"],0, temp, y2=-2))
+
+
+    for node in nodes.values():
+        net.add_element(node)
+    # Dicts preserve order since 3.7
+    node_dict = {component: i for i, component in enumerate(COMPONENTS)}
+    return net, node_dict, nodes
