@@ -19,15 +19,13 @@ def individual_timescales(earth_params, temp_offset=2.0):
     """Calibrate absolute internal timescales for the sampled tipping times.
 
     For a fixed calibration temperature, the isolated cusp element has the form
-    dx/dt = F(x, T) / tau. Therefore its threshold-crossing time is exactly
+    dx/dt = F(x, T) / tau. Therefore, its threshold-crossing time is exactly
     linear in tau. We only need one simulation per element with tau = 1, then
     set tau = sampled_tipping_time / base_crossing_time.
     """
     raw_net, node_dict, nodes = earth_elements(earth_params, temp_offset)
     new_params = copy.deepcopy(earth_params)
     initial_state = [-1.0]
-
-
 
     def base_tipping_time(element):
         name = element[0]
@@ -37,9 +35,9 @@ def individual_timescales(earth_params, temp_offset=2.0):
             raise KeyError(f"Missing required earth parameter: {limit_key}")
         limit_temp = earth_params[limit_key]
         calibration_temp = limit_temp + temp_offset
-        element_data.c.x=calibration_temp
+        element_data.c.set_x(calibration_temp)
 
-        threshold = 0 if element_data.c.x1 else 1
+        threshold = 0 if element_data.c.get_x1() else 1 # Monostable elements are only to be pushed over their midpoint
         def threshold_event(t, y):
             return y[0] - threshold
         threshold_event.terminal = True

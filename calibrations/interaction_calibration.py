@@ -1,3 +1,4 @@
+import copy
 import json
 from typing import Any
 
@@ -5,6 +6,8 @@ from typing import Any
 import numpy as np
 from scipy.integrate import solve_ivp
 import pandas as pd
+from sympy import false
+
 from temp_input.overshoot_trajectory import fit_parameters, overshoot_trajectory
 from pydoe import lhs
 import tqdm
@@ -14,7 +17,11 @@ from core.coupling import linear_coupling, cusp_derivative_coupling
 from core.tipping_element import t_cusp, state_intervention, derivative_intervention, tipping_element
 from core.tipping_network import tipping_network
 from earth_sys.functions_earth_system_no_enso import global_functions
-
+from earth_sys.timing_no_enso import individual_timescales
+from earth_sys.earth_no_enso import earth_elements
+# TODO ask llm to makes this less ass
+from start_ensemble.latin_probability_distribution import update_limits
+update_limits()
 
 input_file = pd.read_csv(r"../start_ensemble/latin_prob_calibration.txt", delimiter=",")
 limit_filename = r"../start_ensemble/limits.json"
@@ -35,11 +42,14 @@ def sa(f):
     """
     return lambda t, y : f(y, t)
 
-def intervention_effect(cause:tipping_element, effect:tipping_element, coupling_strength, derivative):
+def intervention_effect(cause:t_cusp, effect:tipping_element, coupling_strength, derivative):
     intervention_net = tipping_network()
     intervention_net.add_element(effect)
     if derivative:
-        intervention_cause = derivative_intervention(**cause.get_par())
+        intervention_cause = copy.deepcopy(cause)
+        intervention_cause.c.set_x(intervention_cause.c.get_x1()*2 if intervention_cause.c.get_x1()
+                                   else intervention_cause.c.get_x2()*1.5)
+        # intervention_cause = derivative_intervention(**cause.get_par())
     else:
         intervention_cause = state_intervention()
     intervention_net.add_element(intervention_cause)
@@ -148,23 +158,25 @@ def calibrate_interaction(cause:str, effect:str, derivative:bool, n_interaction_
         # fun little lambda behavior again
         temperatures.append(lambda t, tlim = T_lim, r=R, mu0=mu_0, mu1=mu_1: overshoot_trajectory(t, T_0, tlim, r, mu0, mu1))
 
-    for temperature in temperatures:
-        for params in input_file.iterrows():
-            earth_params, cause_element, effect_element = initialize_elements(cause, effect, temperature, params)
+    for params in new_params.iterrows():
+        earth_params = params[1].to_dict()
+        for temperature in temperatures:
+            cause_element, effect_element = initialize_elements(cause, effect, temperature, earth_params)
             tip_isolated = intervention_effect(cause_element, effect_element, 0, derivative)
             total_isolated_tips += tip_isolated
 
     interaction_facs = np.linspace(*interaction_limit, n_interaction_strengths)
     for i, interaction_fac in enumerate(tqdm.tqdm(interaction_facs)):
         n_intervention = 0
-        for temperature in temperatures:
-            for params in input_file.iterrows():
-                earth_params, cause_element, effect_element = initialize_elements(cause, effect, temperature, params)
+        for params in new_params.iterrows():
+            earth_params = params[1].to_dict()
+            for temperature in temperatures:
+                cause_element, effect_element = initialize_elements(cause, effect, temperature, earth_params)
                 interaction_strength = interaction_fac / earth_params[f"{effect}_time"]
                 if derivative:
                     interaction_strength *= earth_params[f"{cause}_time"]
-                    tip_intervention = intervention_effect(cause_element, effect_element, interaction_strength, derivative)
-                    n_intervention += tip_intervention
+                tip_intervention = intervention_effect(cause_element, effect_element, interaction_strength, derivative)
+                n_intervention += tip_intervention
         pf.append(n_intervention/total_isolated_tips)
         if n_intervention/total_isolated_tips > limit[1]:
             interaction_facs = interaction_facs[:i+1]
@@ -172,20 +184,14 @@ def calibrate_interaction(cause:str, effect:str, derivative:bool, n_interaction_
     pf = np.array(pf)
     strictly_monotonic = force_strict_mono(pf)
     df = pd.DataFrame({"pf": pf[strictly_monotonic], "interaction_fac": interaction_facs[strictly_monotonic]})
-    return df, f"{pair[0]}_to_{pair[1]}"
+    return df, f"{cause}_to_{effect}"
 
 
-def initialize_elements(cause: str, effect: str, temperature, params) -> tuple[
-    dict[Any, Any], t_cusp, t_cusp]:
-    earth_params = params[1].to_dict()
-    cause_element = t_cusp(a=-1.0 / earth_params[f"{cause}_time"], b=1.0 / earth_params[f"{cause}_time"],
-                         c=lambda t:(1.0 / earth_params[f"{cause}_time"]) * global_functions.CUSPc(0., earth_params[
-                             f"limits_{cause}"], temperature(t)))
-    effect_element = t_cusp(a=-1.0 / earth_params[f"{effect}_time"], b=1.0 / earth_params[f"{effect}_time"],
-                          c=lambda t: (1.0 / earth_params[f"{effect}_time"]) * global_functions.CUSPc(0., earth_params[
-                              f"limits_{effect}"], temperature(t)))
-    return earth_params, cause_element, effect_element
-
+def initialize_elements(cause: str, effect: str, temperature, earth_params) -> tuple[t_cusp, t_cusp]:
+    net, node_dict, nodes = earth_elements(earth_params, temperature)
+    cause_element = nodes[cause]
+    effect_element = nodes[effect]
+    return cause_element, effect_element
 
 # Generate pairs automatically from pf_ entries in limits.json
 pairs = []
@@ -197,8 +203,12 @@ for key in LIMITS.keys():
             cause, effect = parts
             derivative = (cause in ["WAIS", "GIS"] and effect == "AMOC")
             pairs.append([cause, effect, derivative])
-results = {}
 
+results = {}
+new_params = input_file.copy()
+for i, params in enumerate(input_file.iterrows()):
+    earth_params = params[1].to_dict().copy()
+    new_params.loc[i] = individual_timescales(earth_params)
 for pair in pairs:
     print(f"Currently calibrating: {pair[0]} to {pair[1]}")
     df, name = calibrate_interaction(*pair)
@@ -208,7 +218,8 @@ full_df = pd.concat(results, axis=1)
 full_df.columns.names = ["component", "axis"]
 
 full_df.to_csv("interaction_calibration.csv")
-# TODO somehow, the pf of slightly positive interaction factors is smaller than one (???)
+# TODO If only a single value gets accepted the calibration completely blows up
+# TODO stabilizing effects on bistable elements are far too extreme
 # for params in input_file:
 #     values = list(map(float, params)) # -1 is the mc_dir
 #     earth_params = dict(zip(KEYS, values))

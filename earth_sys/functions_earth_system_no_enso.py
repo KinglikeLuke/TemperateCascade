@@ -1,5 +1,6 @@
 from numbers import Real
 import numpy as np
+from types import SimpleNamespace
 
 """
 Here all global functions are stored - the functions are up to "choice": Here, linear functions are used
@@ -35,32 +36,71 @@ class global_functions():
             y = fbmax
         return y
 
-    # Dont worry about this mess of an architecture...
-    class CUSP:
-        def __init__(self, tau, x1, x2, x, y2=np.sqrt(4 / 27)):
-            self.x1 = x1
-            self.x2 = x2
-            self.x = x
-            self.y2 = y2
-            self.tau = tau
 
-        @property
-        def x(self):
-            return self._x
+    @staticmethod
+    def make_CUSPc(tau, x1, x2, x, y2=np.sqrt(4 / 27)):
+        """
+        Returns a cusp/monostable function. Either x1 or x2 must be zero for this to make sense
+        Args:
+            tau:
+            x1:
+            x2:
+            x:
+            y2:
 
-        @x.setter
-        def x(self, x):
-            if isinstance(x, Real):
-                x = lambda t, xt=x: xt
-            self._x = x
+        Returns:
 
-        def __call__(self, t):
-            return (1.0 / self.tau) * global_functions.CUSPc(self.x1, self.x2, self.x(t), self.y2)
+        """
+        slope = y2 / (x2 - x1) / tau
+        func = None
+        # Nicos original code always uses 0 as the threshold for tipping action. anything else also makes sort of
+        # little sense, thats what the cusp structure is there for
+        temp_thresh = 0 #x1 if x1 != 0 else x2
+        def cusp(t):
+            return func(t)
 
+        def set_x(new_x):
+            nonlocal func
+
+            if callable(new_x):
+                def dynamic(t):
+                    xt = new_x(t)
+                    if xt >= temp_thresh:
+                        return slope * (xt - x1)
+                    return 0.0
+
+                func = dynamic
+            else:
+                def constant(t):
+                    if new_x >= temp_thresh:
+                        return slope * (new_x - x1)
+                    return 0.0
+
+                func = constant
+
+        set_x(x)
+
+
+        def get_x():
+            return x
+
+        def get_x1():
+            return x1
+
+        def get_x2():
+            return x2
+
+        cusp.set_x = set_x
+        cusp.set_x = set_x
+        cusp.get_x = get_x
+        cusp.get_x1 = get_x1
+        cusp.get_x2 = get_x2
+
+        return cusp
     # c = c(GMT) where tipping occurs at sqrt(4/27) ~ 0.38
     # Linear function through two points maps GMT --> c, where x-values represent GMT and y-values represent CUSP-c values
     @staticmethod
-    def CUSPc(x1, x2, x, y2=np.sqrt(4 / 27)):
+    def cusp_c(x1, x2, x, y2=np.sqrt(4 / 27)):
         """
         Computes the output value of a cusp-shaped function
         y/(x2-x1) *(x-x1),

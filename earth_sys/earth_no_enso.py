@@ -2,6 +2,7 @@
 import sys
 from typing import Any
 from numbers import Real
+import timeit
 
 sys.path.append('')
 
@@ -29,8 +30,7 @@ Here the Earth system network is defined after Kriegler et al., 2009
     # else:
     #     params['df_wais_to_thc'] = 0.7109571 * params['pf_wais_to_thc'] + 0.94770077
     # return params
-
-calibration_df = pd.read_csv(r"calibrations\interaction_calibration.csv", header=[0, 1], index_col=0)
+global calibration_df
 COMPONENTS = ["GIS", "AMOC", "WAIS", "Amazonas", "REEF", "AWSI", "PERM", "WAM", "NINO"]
 
 def pf_to_interaction(earth_params, name):
@@ -79,39 +79,27 @@ def earth_network(e_p: dict, temp, strength, kk0, kk1, kk2):
     """
     # set up network
     net, node_dict, nodes = earth_elements(e_p, temp)
+    global calibration_df
+    calibration_df = pd.read_csv(r"calibrations\interaction_calibration.csv", header=[0, 1], index_col=0)
+
+    interactions = [(key.split("_")[1], key.split("_")[3]) for key in e_p.keys() if key.startswith("pf")]
+    # I should have dones this a long time ago
     ######################################Set edges to active state#####################################
-    net.add_coupling(1, 0, linear_coupling(strength=(1.0 / e_p['GIS_time']) * strength * pf_to_interaction(e_p, 'pf_AMOC_to_GIS'), x_0=-1))
-    net.add_coupling(2, 0, linear_coupling(strength=(1.0 / e_p['GIS_time']) * strength * pf_to_interaction(e_p, 'pf_WAIS_to_GIS'), x_0=-1))
-
-    # derivative coupling has pretty substantial impact on performance (20% more)
-    net.add_coupling(0, 1, cusp_derivative_coupling(strength=(1.0 / e_p['AMOC_time']) * e_p['GIS_time'] * strength *
-                                                             pf_to_interaction(e_p, 'pf_GIS_to_AMOC'), params=nodes["GIS"].get_par()))
-    net.add_coupling(2, 1, cusp_derivative_coupling(strength=(1.0 / e_p['AMOC_time']) * e_p['WAIS_time'] * strength *
-                                                             pf_to_interaction(e_p, 'pf_WAIS_to_AMOC'), params=nodes["WAIS"].get_par()))
-    net.add_coupling(8, 1, linear_coupling(strength=(1.0 / e_p['AMOC_time']) * strength * pf_to_interaction(e_p, 'pf_NINO_to_AMOC') * kk1, x_0=-1))
-    # net.add_coupling(5, 1, linear_coupling(strength=(1.0 / earth_params.thc_time) * strength * earth_params.pf_assi_to_thc, x_0=-1))
-
-    net.add_coupling(0, 2, linear_coupling(strength=(1.0 / e_p['WAIS_time']) * strength * pf_to_interaction(e_p, 'pf_GIS_to_WAIS'), x_0=-1))
-    net.add_coupling(1, 2, linear_coupling(strength=(1.0 / e_p['WAIS_time']) * strength * pf_to_interaction(e_p, 'pf_AMOC_to_WAIS'), x_0=-1))
-    net.add_coupling(8, 2, linear_coupling(strength=(1.0 / e_p['WAIS_time']) * strength * pf_to_interaction(e_p, 'pf_NINO_to_WAIS'), x_0=-1))
-
-    net.add_coupling(1, 3, linear_coupling(strength=(1.0 / e_p['Amazonas_time']) * strength * pf_to_interaction(e_p, 'pf_AMOC_to_Amazonas') * kk2, x_0=-1))
-    net.add_coupling(8, 3, linear_coupling(strength=(1.0 / e_p['Amazonas_time']) * strength * pf_to_interaction(e_p, 'pf_NINO_to_Amazonas'), x_0=-1))
-    # nino doesnt tip, so I use Nicos dimensional-analysis based approach (reconfigured so that it matches the new strength of the calibrated interactions)
-    net.add_coupling(2, 8, linear_coupling(strength=(1.0 / e_p['NINO_time']) * strength * e_p['pf_AMOC_to_NINO'], x_0=-1))
-
-    # net.add_coupling(3, 4, linear_coupling(strength=(1.0 / params.nino_time) * strength * params.pf_amaz_to_nino * kk1, x_0=-1)) # doesnt appear in GTP2025
-    # Bara Couplings
-    net.add_coupling(5, 1, linear_coupling(strength=(1.0 / e_p['AMOC_time']) * strength * pf_to_interaction(e_p, 'pf_AWSI_to_AMOC'), x_0=-1))
-    net.add_coupling(5, 0, linear_coupling(strength=(1.0 / e_p['GIS_time']) * strength * pf_to_interaction(e_p, 'pf_AWSI_to_GIS'), x_0=-1))
-    net.add_coupling(5, 6, linear_coupling(strength=(1.0 / e_p['PERM_time']) * strength * pf_to_interaction(e_p, 'pf_AWSI_to_PERM'), x_0=-1))
-    net.add_coupling(1, 5, linear_coupling(strength=(1.0 / e_p['AWSI_time']) * strength * pf_to_interaction(e_p, 'pf_AMOC_to_AWSI'), x_0=-1))
-    net.add_coupling(1, 7, linear_coupling(strength=(1.0 / e_p['WAM_time']) * strength * pf_to_interaction(e_p, 'pf_AMOC_to_WAM'), x_0=-1))
-    net.add_coupling(8, 4, linear_coupling(strength=(1.0 / e_p['REEF_time']) * strength * pf_to_interaction(e_p, 'pf_NINO_to_REEF'), x_0=-1))
-    net.add_coupling(6, 1, linear_coupling(strength=(1.0 / e_p['AMOC_time']) * strength * pf_to_interaction(e_p, 'pf_PERM_to_AMOC'), x_0=-1))
+    for cause, effect in interactions:
+        if not (cause in nodes and effect in nodes):
+            continue
+        if cause in ["WAIS", "GIS"] and effect == "AMOC":
+            net.add_coupling(0, 1,
+                             cusp_derivative_coupling(strength=(e_p[f'{cause}_time'] / e_p[f'{effect}_time'])*strength*
+                                                               pf_to_interaction(e_p, f'pf_{cause}_to_{effect}'),
+                                                      params=nodes[cause].get_par()))
+        else:
+            net.add_coupling(node_dict[cause], node_dict[effect],
+                             linear_coupling(strength=(1.0 / e_p[f'{effect}_time']) * strength *
+                                                      pf_to_interaction(e_p, f'pf_{cause}_to_{effect}'), x_0=-1))
     return net, node_dict
 
-def earth_elements(e_p: dict, temp) -> tuple[tipping_network, dict[Any, Any], dict[str, int]]:
+def earth_elements(e_p: dict, temp) -> tuple[tipping_network, dict[Any, Any], dict[str, t_cusp]]:
     net = tipping_network()
     if isinstance(temp, Real):
         temp = lambda t, tem=temp: tem
@@ -120,15 +108,13 @@ def earth_elements(e_p: dict, temp) -> tuple[tipping_network, dict[Any, Any], di
         # Fucking lambda only saves the reference to t_e, which would then take the last value of t_e, "WAM", for
         # every node. Hence, I have to pass the t_e variable explicitly in the default values.
         nodes[t_e] = t_cusp(a=-1.0 / e_p[f"{t_e}_time"], b=1.0 / e_p[f"{t_e}_time"],
-                            c=global_functions.CUSP(e_p[f"{t_e}_time"], 0, e_p[f"limits_{t_e}"], temp))
+                            c=global_functions.make_CUSPc(e_p[f"{t_e}_time"], 0, e_p[f"limits_{t_e}"], temp))
 
     for t_e in ["AWSI", "PERM", "NINO"]:
         nodes[t_e] = t_cusp(a=-1.0 / e_p[f"{t_e}_time"], b=-1.0 / e_p[f"{t_e}_time"],
-                            c=global_functions.CUSP(e_p[f"{t_e}_time"], e_p[f"limits_{t_e}"],0, temp, y2=-2))
-
-
+                            c=global_functions.make_CUSPc(e_p[f"{t_e}_time"], e_p[f"limits_{t_e}"], 0, temp, y2=-2))
     for node in nodes.values():
         net.add_element(node)
     # Dicts preserve order since 3.7
-    node_dict = {component: i for i, component in enumerate(COMPONENTS)}
+    node_dict = {component: i for i, component in enumerate(nodes.keys())}
     return net, node_dict, nodes

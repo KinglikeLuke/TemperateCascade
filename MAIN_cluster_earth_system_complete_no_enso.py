@@ -28,7 +28,9 @@ from earth_sys.timing_no_enso import individual_timescales
 from earth_sys.earth_no_enso import earth_network, earth_elements, intervene_in_network
 
 from temp_input.overshoot_trajectory import overshoot_trajectory, fit_parameters
-
+# TODO ask llm to makes this less ass
+from start_ensemble.latin_probability_distribution import update_limits
+update_limits()
 #measure time
 #start = time.time()
 #############################GLOBAL SWITCHES#########################################
@@ -192,7 +194,7 @@ def model_interventions():
     Returns:
 
     """
-    interventions = COMPONENTS[:-1] # Amazonas has no outgoing connections. Therefore, it cannot have a causal effect
+    interventions = COMPONENTS # Amazonas has no outgoing connections. Therefore, it cannot have a causal effect
     intervention_states = [-1, 0, 1]
     folder = prepare_folder("intervention")
 
@@ -244,7 +246,7 @@ def model_interventions():
                         if np.any(np.isnan(state_results)):
                             raise RuntimeError("NaN in solution")
                         # TODO TEST!!!
-                        for l, component in enumerate(COMPONENTS):
+                        for l, component in enumerate(node_dict.keys()):
                             state_output[i, T_peak, T_lim, t_conv, intv_element, intv_state, intv_con_strength, component] \
                                 = state_results[l]
                             timing_output[i, T_peak, T_lim, t_conv, intv_element, intv_state, intv_con_strength, component] \

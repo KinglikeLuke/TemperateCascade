@@ -46,7 +46,7 @@ class timing_calibration:
 
         # Create single element network
         net = tipping_network()
-        element = cusp(a=-1.0 / timescale, b=1.0 / timescale, c=(global_functions.CUSPc(0., limit_temp, GMT) / timescale))
+        element = cusp(a=-1.0 / timescale, b=1.0 / timescale, c=(global_functions.cusp_c(0., limit_temp, GMT) / timescale))
         net.add_element(element)
 
         # Simulate

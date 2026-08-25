@@ -49,10 +49,10 @@ class earth_system():
     an integer (-1, 0, +1) for the network type that you want to invoke, i.e. kk0, kk1 and kk2 must be -1, 0 or +1
     """
     def earth_network(self, effective_GMT, strength, kk0, kk1, kk2):
-        gis = cusp(a=-1 / self._gis_time, b=1 / self._gis_time, c=(1 / self._gis_time) * global_functions.CUSPc(0., self._limits_gis, effective_GMT))
-        thc = cusp(a=-1 / self._thc_time, b=1 / self._thc_time, c=(1 / self._thc_time) * global_functions.CUSPc(0., self._limits_thc, effective_GMT))
-        wais = cusp(a=-1 / self._wais_time, b=1 / self._wais_time, c=(1 / self._wais_time) * global_functions.CUSPc(0., self._limits_wais, effective_GMT))
-        amaz = cusp(a=-1 / self._amaz_time, b=1 / self._amaz_time, c=(1 / self._amaz_time) * global_functions.CUSPc(0., self._limits_amaz, effective_GMT))
+        gis = cusp(a=-1 / self._gis_time, b=1 / self._gis_time, c=(1 / self._gis_time) * global_functions.cusp_c(0., self._limits_gis, effective_GMT))
+        thc = cusp(a=-1 / self._thc_time, b=1 / self._thc_time, c=(1 / self._thc_time) * global_functions.cusp_c(0., self._limits_thc, effective_GMT))
+        wais = cusp(a=-1 / self._wais_time, b=1 / self._wais_time, c=(1 / self._wais_time) * global_functions.cusp_c(0., self._limits_wais, effective_GMT))
+        amaz = cusp(a=-1 / self._amaz_time, b=1 / self._amaz_time, c=(1 / self._amaz_time) * global_functions.cusp_c(0., self._limits_amaz, effective_GMT))
 
         # set up network
         net = tipping_network()

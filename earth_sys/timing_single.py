@@ -31,7 +31,7 @@ class timing():
         self._tip_point_gis = 1.8  # most probable tipping point (see Robinson, 2012)    #value normed to GIS
         self._c_krit = np.sqrt(4 / 27)
         self._GMT_cal = 4.0                                        						 #normed temperature
-        self._epsilon_c = global_functions.CUSPc(0., self._tip_point_gis, self._GMT_cal) - self._c_krit
+        self._epsilon_c = global_functions.cusp_c(0., self._tip_point_gis, self._GMT_cal) - self._c_krit
         self._initial_state = [-1.]
         self._threshold = 1.0
 

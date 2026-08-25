@@ -771,8 +771,8 @@ def extract_influences(state_series, mode = "ATE"):
     for intervention in interventions:
         influences[intervention] = {}
         for component in components:
-            if component in [intervention,
-                             "NINO"]:  # uninteresting, cuz component then isnt dynamic/not tipping element
+            if component == intervention:
+                             #"NINO"]:  # uninteresting, cuz component then isnt dynamic/not tipping element
                 continue
             # WAIS and GIS tip too slowly to show much effect on each other after 1ka
             no_tip = state_series.xs((intervention, -1, component),
@@ -896,7 +896,7 @@ def plot_influence_matrix(influence_matrix: ndarray[tuple[int, int, int], dtype[
         cmap.set_bad(color='k')
         component_heatmap = comp_ax.imshow(component_values, origin="upper", aspect="equal",
                                            cmap=cmap, interpolation="none",
-                                           norm=colors.TwoSlopeNorm(vmin=-1, vmax=1, vcenter=0))
+                                           norm=colors.TwoSlopeNorm(vmin=-1.1, vmax=1.1, vcenter=0))
         hatch_nan_cells(comp_ax, component_values)
         comp_ax.set_xticks(range(len(components)-1), labels=components[:-1],
                       rotation=45, ha="right", rotation_mode="anchor")
@@ -943,8 +943,8 @@ def intervention_matrix(state_df):
                     .drop(["NINO", "REEF"], level="component")
                     .drop(["REEF"], level="intervention"))
     _, pairwise_influence_matrix, temperatures = extract_influences(pairwise_series, mode="ATE")
-    plot_influence_matrix(pairwise_influence_matrix, components,interventions, temperatures,
-                          )#f"linear_infmatr{int(time/1000)}ka")
+    plot_influence_matrix(influence_matrix, components,interventions, temperatures,
+                          f"second_order_infmatr{int(time/1000)}ka")
 
 
 def network_effects(state_df):
@@ -1066,7 +1066,7 @@ def main():
     # plot_pf_calibration()
     state_df = load_longform_df(fr"{FOLDER}\dataframe.csv")
     # intervention_analysis(state_df, timing_df)
-    # intervention_matrix(state_df)
+    intervention_matrix(state_df)
     network_effects(state_df)
     # snapshot_df = state_df[50_000]
     # snapshot_df.name = "value"
@@ -1074,7 +1074,7 @@ def main():
     # state_plot(snapshot_df)
 
 OVERSHOOT_PROPERTIES = ["T_lim", "T_peak", "t_conv"]
-FOLDER = r"C:\Users\lukas\Documents\PhD\numerical_data\results\intervention\2026-08-06_1"
+FOLDER = r"C:\Users\lukas\Documents\PhD\numerical_data\results\intervention\2026-08-25_1"
 if __name__ == "__main__":
     main()
 

@@ -87,14 +87,14 @@ class tipping_network(DiGraph):
             #     impact_matrix[edge[1]][edge[0]]=edge['data']
         return impact_matrix
 
-    def get_node_parameters(self):
+    def get_node_parameters(self, t=0):
         """Returns all parameters of the nodes in a dictionary at time 0 for time dependent variables"""
         node_params = {}
         for node_id, node_data in self.nodes(data=True):
             element = node_data['data']
             par = element.get_par()
             if callable(par['c']):
-                par['c'] = par['c'](0)
+                par['c'] = par['c'](t)
             node_params[node_id] = par
         return node_params
 

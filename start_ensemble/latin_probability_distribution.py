@@ -7,86 +7,96 @@ import json
 sns.set(font_scale=1.25)
 from pydoe import lhs #function name >>> lhs
 
-elements = {}
+ELEMENTS = {}
 #Tipping limits, see Schellnhuber, et al., 2016:
-elements["limits_GIS"]= [0.8, 3.2]
-elements["limits_AMOC"]= [1.4, 8.0]
-elements["limits_WAIS"] = [1.0, 3.0]
-elements["limits_Amazonas"] = [2.0, 6.0]
-elements["limits_NINO"] = [3.0, 6.0]
-elements["limits_REEF"]=[1.0, 2.0]
-elements["limits_WAM"]=[2.0, 3.5]
-elements["limits_AWSI"]=[4.5, 8.7]
-elements["limits_PERM"]=[3.0, 6.0]
+ELEMENTS["limits_GIS"]= [0.8, 3.2]
+ELEMENTS["limits_AMOC"]= [1.4, 8.0]
+ELEMENTS["limits_WAIS"] = [1.0, 3.0]
+ELEMENTS["limits_Amazonas"] = [2.0, 6.0]
+ELEMENTS["limits_NINO"] = [3.0, 6.0]
+ELEMENTS["limits_REEF"]=[1.0, 2.0]
+ELEMENTS["limits_WAM"]=[2.0, 3.5]
+ELEMENTS["limits_AWSI"]=[4.5, 8.7]
+ELEMENTS["limits_PERM"]=[3.0, 6.0]
 # elements["limits_ASSI"] = [1.3, 2.9]
 
 ###################################################
 # PFs as given in Kriegler, with sign changed depending on what newer GTPRs list
 #TO GIS
-elements["pf_WAIS_to_GIS"] = [1, 2]
-elements["pf_AMOC_to_GIS"] = [0.1, 1.]
+ELEMENTS["pf_WAIS_to_GIS"] = [1, 2]
+ELEMENTS["pf_AMOC_to_GIS"] = [0.1, 1.]
+ELEMENTS["pf_AWSI_to_GIS"] = [1, 2]
+
 # TO AMOC
-elements["pf_GIS_to_AMOC"] = [1., 10.]
-elements["pf_NINO_to_AMOC"] = [0.5, 2]
-elements["pf_WAIS_to_AMOC"] = [0.6, 1] # reaching 0.3 is effectively impossible. Also, weak, but stabilizing influence in GTPR2025
+ELEMENTS["pf_GIS_to_AMOC"] = [1., 10.]
+ELEMENTS["pf_NINO_to_AMOC"] = [0.5, 2]
+ELEMENTS["pf_WAIS_to_AMOC"] = [0.6, 1] # reaching 0.3 is effectively impossible. Also, weak, but stabilizing influence in GTPR2025
+ELEMENTS["pf_PERM_to_AMOC"] = [1, 1.5]
+ELEMENTS["pf_AWSI_to_AMOC"] = [1, 3]
 # elements["pf_ASSI_to_AMOC"] = [0.1, 0.5]
 # TO WAIS. Generally, WAIS tips so often in an "intermediate" temperature trajectory that any factor greater than 2 is unattainable
-elements["pf_NINO_to_WAIS"] = [1, 5] # TODO rerun with 5
-elements["pf_AMOC_to_WAIS" ]= [1, 1.5]
-elements["pf_GIS_to_WAIS" ]= [1, 5.0] # ultra sketch. I dont know how they imagine a tenfold increase between ice sheets (having very similar limiting temperature and all...)
+ELEMENTS["pf_NINO_to_WAIS"] = [1, 5] # TODO rerun with 5
+ELEMENTS["pf_AMOC_to_WAIS"]= [1, 1.5]
+ELEMENTS["pf_GIS_to_WAIS"]= [1, 5.0] # ultra sketch. I dont know how they imagine a tenfold increase between ice sheets (having very similar limiting temperature and all...)
 #TO AMAZ
-elements["pf_NINO_to_Amazonas"] = [1, 10]
-elements["pf_AMOC_to_Amazonas" ]= [0.5, 1] # sketch. Probably stabilizing, regional variations
+ELEMENTS["pf_NINO_to_Amazonas"] = [1, 10]
+ELEMENTS["pf_AMOC_to_Amazonas"]= [0.5, 1] # sketch. Probably stabilizing, regional variations
 #TO NINO
-elements["pf_AMOC_to_NINO"] = [0.1, 0.2]
+ELEMENTS["pf_AMOC_to_NINO"] = [0.1, 0.2]
 # # TO ASSI
-# elements["pf_AMOC_to_ASSI"] = [0.5, 0.1]
-# Bara Connections
-elements["pf_AWSI_to_AMOC"] = [1, 3]
-elements["pf_AWSI_to_GIS"] = [1, 2]
-elements["pf_AWSI_to_PERM"] = [1, 2]
-elements["pf_AMOC_to_AWSI"] = [0.3, 1]
-elements["pf_AMOC_to_WAM"] = [1, 1.5]
-elements["pf_NINO_to_REEF"] = [1, 10]
-elements["pf_PERM_to_AMOC"] = [1, 1.5]
+ELEMENTS["pf_AWSI_to_PERM"] = [1, 2]
+ELEMENTS["pf_AMOC_to_AWSI"] = [0.3, 1]
+ELEMENTS["pf_AMOC_to_WAM"] = [1, 1.5]
+ELEMENTS["pf_NINO_to_REEF"] = [1, 10]
 
 # TIMINGS
 # Rosser 2024
-elements["GIS_time"]=[1000, 15000]
-elements["AMOC_time"]=[15,300]
-elements["WAIS_time"]=[500, 13000]
-elements["NINO_time"]=[25, 200]
-elements["Amazonas_time"]=[50, 200]
-elements["REEF_time"]=[10, 11]
-elements["WAM_time"]=[10, 500]
-elements["AWSI_time"]=[10, 100]
-elements["PERM_time"]=[10, 300]
+ELEMENTS["GIS_time"]=[1000, 15000]
+ELEMENTS["AMOC_time"]=[15, 300]
+ELEMENTS["WAIS_time"]=[500, 13000]
+ELEMENTS["NINO_time"]=[25, 200]
+ELEMENTS["Amazonas_time"]=[50, 200]
+ELEMENTS["REEF_time"]=[10, 11]
+ELEMENTS["WAM_time"]=[10, 500]
+ELEMENTS["AWSI_time"]=[10, 100]
+ELEMENTS["PERM_time"]=[10, 300]
 # elements["ASSI_time"]=[10,50]
 
-with open("limits.json", "w") as file:
-    json.dump(elements, file)
+def update_limits():
+    with open("limits.json", "w") as file:
+        json.dump(ELEMENTS, file)
+
+
+def main():
+    """
+Latin hypercube sampling
+"""
+    points = np.array(
+        lhs(len(ELEMENTS.keys()), samples=200))  # give dimensions and sample size, here shown for a Latin hypercube
+
+    # rescaling function from latin hypercube
+    def latin_function(limits, rand):
+        resc_rand = limits[0] + (limits[1] - limits[0]) * rand
+        return resc_rand
+
+    # MAIN
+    array_limits = []
+    sh_file = []
+    for i in range(0, len(points)):
+        print(i)
+        array_limits.append(
+            [latin_function(value, points[i][element_ind]) for element_ind, value in enumerate(ELEMENTS.values())])
+
+    array_limits = pd.DataFrame(array_limits, columns=list(ELEMENTS.keys()))
+    array_limits = array_limits.to_csv("latin_prob.txt", index=False)
+
+
 # limit_filename = r"start_ensemble\limits.json"
 # with open(limit_filename, "r") as file:
 #     elements = json.load(file)
-"""
-Latin hypercube sampling
-"""
-points = np.array(lhs(len(elements.keys()), samples=200)) #give dimensions and sample size, here shown for a Latin hypercube
-
-#rescaling function from latin hypercube
-def latin_function(limits, rand):
-    resc_rand = limits[0] + (limits[1] - limits[0]) * rand
-    return resc_rand
-
-#MAIN
-array_limits = []
-sh_file = []
-for i in range(0, len(points)):
-    print(i)
-    array_limits.append([latin_function(value, points[i][element_ind]) for element_ind, value in enumerate(elements.values())])
-
-array_limits = pd.DataFrame(array_limits, columns=list(elements.keys()))
-array_limits = array_limits.to_csv("latin_prob.txt", index=False)
+if __name__ == "__main__":
+    main()
+    print("Finish")
 # np.savetxt("latin_prob.txt", array_limits, delimiter=" ")
 
 
@@ -148,7 +158,6 @@ array_limits = array_limits.to_csv("latin_prob.txt", index=False)
 # plt.clf()
 # plt.close()
 
-print("Finish")
 
 
 
