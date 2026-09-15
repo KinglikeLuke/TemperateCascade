@@ -758,9 +758,7 @@ def combine_cfg_matrices(cfgs, components, index):
     }
     return combined
 
-def extract_influences(state_series, mode = "ATE"):
-    interventions = state_series.index.get_level_values("intervention").unique()
-    components = state_series.index.get_level_values("component").unique()
+def extract_influences(state_series, interventions, components, mode = "ATE"):
     X_plot = state_series.index.to_frame(index=False)[OVERSHOOT_PROPERTIES].drop_duplicates().to_numpy()
     influences = {}
     if X_plot.shape[0] < 5:
@@ -777,16 +775,9 @@ def extract_influences(state_series, mode = "ATE"):
             # WAIS and GIS tip too slowly to show much effect on each other after 1ka
             no_tip = state_series.xs((intervention, -1, component),
                                      level=["intervention", "state", "component"])
-            tip = state_series.xs((intervention, 1, component),
+            tip = state_series.xs((intervention, 0, component),
                                   level=["intervention", "state", "component"])
-            # free_run = state_series.xs((intervention, 0, component),
-            #                            level=["intervention", "state", "component"])
-            # if component == "total":  # remove the effect of the intervention on the total
-            #     tip -= state_series.xs((intervention, 1, intervention),
-            #                            level=["intervention", "state", "component"]) > 0
-            # p_intervention = ((state_df[50000].xs((intervention, 0, intervention),
-            #                                       level=["intervention", "state", "component"]) > 1)
-            #                   .groupby(level=[OVERSHOOT_PROPERTIES]).mean())
+
             if mode == "PF":
                 if component != "total":
                     ate_on_component = (tip > 0).groupby(
@@ -808,7 +799,7 @@ def extract_influences(state_series, mode = "ATE"):
                     no_tip_total = ((manual_total.xs(-1, level="state"))
                                     .groupby(level=["lhc", *OVERSHOOT_PROPERTIES]).sum()
                                     .groupby(level=[OVERSHOOT_PROPERTIES]).mean())
-                    tip_total = ((manual_total.xs(1, level="state"))
+                    tip_total = ((manual_total.xs(0, level="state"))
                                     .groupby(level=["lhc", *OVERSHOOT_PROPERTIES]).sum()
                                     .groupby(level=[OVERSHOOT_PROPERTIES]).mean())
                     ate_on_component = tip_total - no_tip_total
@@ -919,31 +910,34 @@ def plot_influence_matrix(influence_matrix: ndarray[tuple[int, int, int], dtype[
         comp_max = np.nanmax(influence_matrix[:, :-1, i])
         comp_cbar.ax.set_ylim(comp_min - 0.01, comp_max)
         calculate_clean_ticks(comp_min, comp_max, 5)
-        comp_cbar.ax.set_yticks(calculate_clean_ticks(comp_min, comp_max, 5))
+        comp_cbar.ax.set_yticks(calculate_clean_ticks(comp_min, comp_max, 4))
         # comp_cbar.ax.set_yticks([comp_min, -0.1,  0, 0.1, comp_max])
         comp_cmap_ax.get_yaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-        total_colorbar = fig.colorbar(total_heatmap, cax=total_cmap_ax)
-        total_colorbar.ax.set_ylim(vmin_total - 0.03, vmax_total + 0.03)
+        total_cbar = fig.colorbar(total_heatmap, cax=total_cmap_ax)
+        total_cbar.ax.set_ylim(vmin_total - 0.01, vmax_total + 0.01)
+        total_cbar.ax.set_yticks(calculate_clean_ticks(vmin_total, vmax_total, 4))
         #fig.tight_layout()
         if plotname:
-            fig.savefig(fr"C:\Users\lukas\Documents\PhD\numerical_data\analysis_results\Causal Effect\{temperatures[i][0]}{plotname}.png")
+            fig.savefig(fr"C:\Users\lukas\Documents\PhD\Paper 1\numerical_data\analysis_results\Causal Effect\{temperatures[i][0]}{plotname}.png")
     plt.show()
 
 def intervention_matrix(state_df):
     time = 50000
+    state_df=state_df.drop("REEF", level="component").drop("REEF", level="intervention")
     state_series = (state_df[time]
-                    .xs(1.0, level="strength")
-                    .drop(["NINO", "REEF"], level="component")
-                    .drop(["REEF"], level="intervention"))
+                    .xs(1.0, level="strength"))
+                    # .drop(["REEF"], level="intervention"))
     components = state_series.index.get_level_values("component").unique()
     interventions = state_series.index.get_level_values("intervention").unique()
-    influences, influence_matrix, temperatures = extract_influences(state_series, mode="ATE")
+    order = {x: i for i, x in enumerate(components)}
+    interventions = interventions.sort_values(key=lambda x: x.map(order).fillna(len(order)))
+    influences, influence_matrix, temperatures = extract_influences(state_series, interventions, components, mode="ATE")
     pairwise_series = (state_df[time]
-                    .xs(0.0, level="strength")
-                    .drop(["NINO", "REEF"], level="component")
-                    .drop(["REEF"], level="intervention"))
-    _, pairwise_influence_matrix, temperatures = extract_influences(pairwise_series, mode="ATE")
-    plot_influence_matrix(influence_matrix, components,interventions, temperatures,
+                    .xs(0.0, level="strength"))
+                    # .drop(["NINO", "REEF"], level="component")
+                    # .drop(["REEF"], level="intervention"))
+    _, pairwise_influence_matrix, temperatures = extract_influences(pairwise_series, interventions, components, mode="ATE")
+    plot_influence_matrix(influence_matrix - pairwise_influence_matrix, components,interventions, temperatures,
                           f"second_order_infmatr{int(time/1000)}ka")
 
 
@@ -1074,7 +1068,7 @@ def main():
     # state_plot(snapshot_df)
 
 OVERSHOOT_PROPERTIES = ["T_lim", "T_peak", "t_conv"]
-FOLDER = r"C:\Users\lukas\Documents\PhD\numerical_data\results\intervention\2026-08-25_1"
+FOLDER = r"C:\Users\lukas\Documents\PhD\Paper 1\numerical_data\results\intervention\2026-08-26_2"
 if __name__ == "__main__":
     main()
 

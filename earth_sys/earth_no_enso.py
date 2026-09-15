@@ -2,7 +2,7 @@
 import sys
 from typing import Any
 from numbers import Real
-import timeit
+import copy
 
 sys.path.append('')
 
@@ -42,6 +42,7 @@ def pf_to_interaction(earth_params, name):
         positive_influence (_type_): _description_
     """
     columns = calibration_df[name[3:]].dropna()
+
     return np.interp(earth_params[name], columns["pf"], columns["interaction_fac"])
 
 def intervene_in_network(net, intervention_element, intervention_state, node_dict):
@@ -61,7 +62,10 @@ def intervene_in_network(net, intervention_element, intervention_state, node_dic
     if not intervention_state:
         return net, initial_state
     if intervention_element in ["WAIS", "GIS"] and intervention_state == 1:
-        intervention_node = derivative_intervention(**net.nodes[node_dict[intervention_element]]['data'].get_par())
+        # intervention_node = derivative_intervention(**net.nodes[node_dict[intervention_element]]['data'].get_par())
+        intervention_node = copy.deepcopy(net.nodes[node_dict[intervention_element]]['data'])
+        intervention_node.c.set_x(intervention_node.c.get_x1()*2 if intervention_node.c.get_x1()
+                                   else intervention_node.c.get_x2()*1.5)
     else:
         intervention_node = state_intervention()
         initial_state[node_dict[intervention_element]] = intervention_state
@@ -89,7 +93,7 @@ def earth_network(e_p: dict, temp, strength, kk0, kk1, kk2):
         if not (cause in nodes and effect in nodes):
             continue
         if cause in ["WAIS", "GIS"] and effect == "AMOC":
-            net.add_coupling(0, 1,
+            net.add_coupling(node_dict[cause], node_dict[effect],
                              cusp_derivative_coupling(strength=(e_p[f'{cause}_time'] / e_p[f'{effect}_time'])*strength*
                                                                pf_to_interaction(e_p, f'pf_{cause}_to_{effect}'),
                                                       params=nodes[cause].get_par()))

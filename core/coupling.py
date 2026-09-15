@@ -77,7 +77,7 @@ class cusp_derivative_coupling(coupling):
         
     def dxdt_cpl(self):
         """Returns callable for the coupling term of dxdt."""
-        return lambda t, x_from , x_to : self._strength * (self._par['a'] * pow(x_from,3) + self._par['b'] * x_from \
+        return lambda t, x_from , x_to : self._strength * (self._par['a'] * pow(x_from,3) + self._par['b'] * x_from
                                                        + self._par['c'](t))
     
     def jac_cpl(self):

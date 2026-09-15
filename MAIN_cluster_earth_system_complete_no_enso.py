@@ -138,7 +138,7 @@ def model_strengths():
                 # saving structure: configuration x features x time
                 if np.any(np.isnan(state_results)):
                     raise RuntimeError("NaN in solution")
-                for l, component in enumerate(COMPONENTS):
+                for l, component in enumerate(node_dict.keys()):
                     state_output[i, T_peak, T_lim, t_conv, strength, component] = state_results[l]
                     timing_output[i, T_peak, T_lim, t_conv, strength, component] = tip_times[l]
                 state_output[i, T_peak, T_lim, t_conv, strength, "total"] = state_results[-1]
@@ -426,7 +426,7 @@ def rename_characteristic(temperature_trajs,):
 
 DEBUGGING_MODE = sys.monitoring.get_tool(sys.monitoring.DEBUGGER_ID) is not None
 if __name__ == "__main__":
-    model_interventions()
+    model_strengths()
 # Good lord
 # The original Code steps in 0.1 (absolute? idk) year steps through the solver (because the stepsize is far greater than the calibrated(?) t_end)
 # However, it takes its Temperature curve as if it made 1 year steps (every step a new year)
