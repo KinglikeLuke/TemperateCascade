@@ -27,7 +27,11 @@ from pydoe import lhs
 from earth_sys.timing_no_enso import individual_timescales
 from earth_sys.earth_no_enso import earth_network, earth_elements, intervene_in_network
 
-from temp_input.overshoot_trajectory import overshoot_trajectory, fit_parameters
+from temp_input.overshoot_trajectory import (
+    overshoot_trajectory,
+    fit_parameters,
+    load_projection_forcings,
+)
 # TODO ask llm to makes this less ass
 from start_ensemble.latin_probability_distribution import update_limits
 update_limits()
@@ -41,6 +45,13 @@ DURATION = 50000 #actual real simulation years
 N_STEPS = 1000
 T_0 = 1.0
 N_OVERSHOOTS = 200
+TEMPERATURE_TRAJECTORY_KIND = "forcing" # os.environ.get("TEMPERATURE_TRAJECTORY_KIND", "overshoot").lower()
+FORCING_PROJECTION_PATH = r"temp_input\trajectories\temperature_HL.csv"#os.environ.get("FORCING_PROJECTION_PATH", r"temp_input\trajectories")
+FORCING_TIME_COLUMN = "timebounds" #os.environ.get("FORCING_TIME_COLUMN") or None
+FORCING_TEMPERATURE_COLUMN = "*" # os.environ.get("FORCING_TEMPERATURE_COLUMN") or None
+FORCING_TIME_ZERO = 2020 # os.environ.get("FORCING_TIME_ZERO")
+FORCING_TIME_ZERO = float(FORCING_TIME_ZERO) if FORCING_TIME_ZERO is not None else None
+FORCING_EXTRAPOLATION = os.environ.get("FORCING_EXTRAPOLATION", "edge").lower()
 #Names to create the respective directories
 long_save_name = "../numerical_data/results"
 limit_filename = r"start_ensemble\limits.json"
@@ -56,6 +67,11 @@ def forcing_function(T_0, mu_0, mu_1, T_lim, R):
     """Returns the overshoot trajectory for given parameters as a function of t
     """
     return lambda t: overshoot_trajectory(t, T_0, T_lim, R, mu_0, mu_1)
+
+
+def scale_forcing(forcing, conv_fac_gis):
+    """Scale model time to forcing time."""
+    return lambda t: forcing(t * conv_fac_gis)
 
 
 COMPONENTS = ["GIS", "AMOC", "WAIS", "Amazonas", "REEF", "AWSI", "PERM", "WAM", "NINO"] # tipping elements need to be gathered at the start
@@ -110,27 +126,19 @@ def model_strengths():
     tipping_df = pd.DataFrame({}, index=index)
     timing_df = pd.DataFrame({"tip_time": pd.Series(dtype="float64")}, index=index)
 
+    temperature_inputs = prepare_temperature_inputs(mode="grid")
     for i, sys_var in enumerate(tqdm(input_file.iterrows(), total=input_file.shape[0])):
         conv_fac_gis, earth_params = prepare_earth_params(sys_var)
-        T_0s, T_lims, T_peaks, t_convs = prepare_overshoots(mode = "grid")
         state_output = {}
         timing_output = {}
-        T_index = 0
-        for T_0_iter, T_peak, T_lim, t_conv in zip(T_0s, T_peaks, T_lims, t_convs):
-            try:
-                R, mu_0, mu_1 = fit_parameters(T_0_iter, T_peak, T_lim, t_conv)
-            except RuntimeError as error:
-                print(f"{error}: Parameters T_0:{T_0_iter}, T_peak:{T_peak}, T_lim:{T_lim}, t_conv:{t_conv}")
-                T_0s = np.delete(T_0s, T_index)
-                T_peaks = np.delete(T_peaks, T_index)
-                T_lims = np.delete(T_lims, T_index)
-                t_convs = np.delete(t_convs, T_index)
-                continue
-            T_index += 1
+        for temperature_input in temperature_inputs:
+            T_peak = temperature_input["T_peak"]
+            T_lim = temperature_input["T_lim"]
+            t_conv = temperature_input["t_conv"]
             for j, strength in enumerate(coupling_strengths):
                 # How many points are to be calculated. odeint's precision is mostly independent of this, taking adaptive steps
                 # scale the temperature properly
-                forcing = lambda t: forcing_function(T_0_iter, mu_0, mu_1, T_lim, R)(t * conv_fac_gis)
+                forcing = scale_forcing(temperature_input["forcing"], conv_fac_gis)
                 net, node_dict = earth_network(earth_params, forcing, strength, 1, 1, 1) # here be ks
                 initial_state = -1*np.ones(len(net.nodes)) #initial state
 
@@ -205,24 +213,16 @@ def model_interventions():
     tipping_df = pd.DataFrame({}, index=index)
     timing_df = pd.DataFrame({}, index=index)
 
-    T_0s, T_lims, T_peaks, t_convs = prepare_overshoots(mode = "flat")
+    temperature_inputs = prepare_temperature_inputs(mode="flat")
     for i, sys_var in enumerate(tqdm(input_file.iterrows(), total=input_file.shape[0])):
         conv_fac_gis, earth_params = prepare_earth_params(sys_var)
 
         state_output = {}
         timing_output = {}
-        T_index = 0
-        for T_0_iter, T_peak, T_lim, t_conv in zip(T_0s, T_peaks, T_lims, t_convs):
-            try:
-                R, mu_0, mu_1 = fit_parameters(T_0_iter, T_peak, T_lim, t_conv)
-            except RuntimeError as error:
-                print(f"{error} Parameters T_0:{T_0_iter}, T_peak:{T_peak}, T_lim:{T_lim}, t_conv:{t_conv}")
-                T_0s = np.delete(T_0s, T_index)
-                T_peaks = np.delete(T_peaks, T_index)
-                T_lims = np.delete(T_lims, T_index)
-                t_convs = np.delete(t_convs, T_index)
-                continue
-            T_index += 1
+        for temperature_input in temperature_inputs:
+            T_peak = temperature_input["T_peak"]
+            T_lim = temperature_input["T_lim"]
+            t_conv = temperature_input["t_conv"]
             for j, intv_element in enumerate(interventions):
                 for k, intv_state in enumerate(intervention_states):
                     for intv_con_strength in (0, 1):
@@ -236,7 +236,7 @@ def model_interventions():
                                 # else
                                 #   earth_params[key] = LIMITS[key][np.argmax(np.abs(np.array(LIMITS[key]) - 1))]
                         # scale the temperature properly
-                        forcing = lambda t: forcing_function(T_0_iter, mu_0, mu_1, T_lim, R)(t * conv_fac_gis)
+                        forcing = scale_forcing(temperature_input["forcing"], conv_fac_gis)
                         net, node_dict = earth_network(earth_params, forcing, strength=1, kk0=1, kk1=1, kk2=1)
                         # TODO TEST!!!
                         net, initial_state = intervene_in_network(net, intv_element, intv_state, node_dict)
@@ -285,6 +285,71 @@ def simulate_network(net, initial_state, conv_fac_gis):
     total_tipped = np.array([net.get_number_tipped(timeseries) for timeseries in sol])
     state_results = np.concatenate((sol, total_tipped[:, np.newaxis]), axis=1).T
     return state_results, tip_times
+
+
+def prepare_temperature_inputs(mode="random"):
+    if TEMPERATURE_TRAJECTORY_KIND == "overshoot":
+        return prepare_overshoot_inputs(mode)
+    if TEMPERATURE_TRAJECTORY_KIND == "forcing":
+        return prepare_projection_inputs()
+    raise ValueError(
+        "TEMPERATURE_TRAJECTORY_KIND must be 'overshoot' or 'forcing', "
+        f"not '{TEMPERATURE_TRAJECTORY_KIND}'."
+    )
+
+
+def prepare_overshoot_inputs(mode="random"):
+    T_0s, T_lims, T_peaks, t_convs = prepare_overshoots(mode=mode)
+    temperature_inputs = []
+    for T_0_iter, T_peak, T_lim, t_conv in zip(T_0s, T_peaks, T_lims, t_convs):
+        try:
+            R, mu_0, mu_1 = fit_parameters(T_0_iter, T_peak, T_lim, t_conv)
+        except RuntimeError as error:
+            print(f"{error}: Parameters T_0:{T_0_iter}, T_peak:{T_peak}, T_lim:{T_lim}, t_conv:{t_conv}")
+            continue
+        temperature_inputs.append({
+            "T_peak": T_peak,
+            "T_lim": T_lim,
+            "t_conv": t_conv,
+            "forcing": forcing_function(T_0_iter, mu_0, mu_1, T_lim, R),
+        })
+    return temperature_inputs
+
+
+def prepare_projection_inputs():
+    paths = projection_paths(FORCING_PROJECTION_PATH)
+    temperature_inputs = []
+    for path in paths:
+        projections = load_projection_forcings(
+            path,
+            time_column=FORCING_TIME_COLUMN,
+            temperature_columns=FORCING_TEMPERATURE_COLUMN,
+            time_zero=FORCING_TIME_ZERO,
+            extrapolation=FORCING_EXTRAPOLATION,
+        )
+        for projection in projections:
+            temperature_inputs.append({
+                "T_peak": projection["T_peak"],
+                "T_lim": projection["T_lim"],
+                "t_conv": projection["t_conv"],
+                "forcing": projection["forcing"],
+            })
+    return temperature_inputs
+
+
+def projection_paths(path):
+    if os.path.isfile(path):
+        return [path]
+    if os.path.isdir(path):
+        paths = []
+        for pattern in ("*.csv", "*.txt", "*.tsv", "*.dat"):
+            paths.extend(glob.glob(os.path.join(path, pattern)))
+        if paths:
+            return sorted(paths)
+    raise FileNotFoundError(
+        f"No forcing projection files found at '{path}'. Set FORCING_PROJECTION_PATH "
+        "to a file or a directory containing csv/txt/tsv/dat projections."
+    )
 
 
 def prepare_overshoots(mode="random"):
@@ -378,7 +443,7 @@ def state_results_to_df(state_output, tipping_df):
         orient="index",
         columns=np.linspace(0, DURATION, N_STEPS + 1)
     )
-    new_tipping_df = new_tipping_df[[1000, 50000]]
+    new_tipping_df = new_tipping_df[[1000, DURATION]]
     new_tipping_df.index = pd.MultiIndex.from_tuples(
         new_tipping_df.index,
         names=tipping_df.index.names
