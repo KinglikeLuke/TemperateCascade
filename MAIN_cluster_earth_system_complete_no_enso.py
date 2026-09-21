@@ -15,12 +15,12 @@ sns.set(font_scale=1.)
 import itertools
 import datetime
 import glob
-# from PyPDF2 import PdfMerger # dont really know what I would want with the merged PDFs 
+from pathlib import Path
+# from PyPDF2 import PdfMerger # dont really know what I would want with the merged PDFs
 from scipy.integrate import solve_ivp, quad
 from tqdm import tqdm
 import pandas as pd
 from pydoe import lhs
-
 # private imports from sys.path
 
 #private imports for earth system
@@ -46,7 +46,7 @@ N_STEPS = 1000
 T_0 = 1.0
 N_OVERSHOOTS = 200
 TEMPERATURE_TRAJECTORY_KIND = "forcing" # os.environ.get("TEMPERATURE_TRAJECTORY_KIND", "overshoot").lower()
-FORCING_PROJECTION_PATH = r"temp_input\trajectories\temperature_HL.csv"#os.environ.get("FORCING_PROJECTION_PATH", r"temp_input\trajectories")
+FORCING_PROJECTION_PATH = r"temp_input\trajectories\temperature_VL.csv"#os.environ.get("FORCING_PROJECTION_PATH", r"temp_input\trajectories")
 FORCING_TIME_COLUMN = "timebounds" #os.environ.get("FORCING_TIME_COLUMN") or None
 FORCING_TEMPERATURE_COLUMN = "*" # os.environ.get("FORCING_TEMPERATURE_COLUMN") or None
 FORCING_TIME_ZERO = 2020 # os.environ.get("FORCING_TIME_ZERO")
@@ -415,6 +415,8 @@ def prepare_folder(experiment_name):
 
     """
     folder = f"{long_save_name}/{experiment_name}/{startdate}_1"
+    if TEMPERATURE_TRAJECTORY_KIND == "forcing":
+        folder = f"{long_save_name}/{experiment_name}/{startdate}_{Path(FORCING_PROJECTION_PATH).stem}_1"
     while os.path.isdir(f"{folder}"):
         match = re.search(r"_(\d+)$", folder)
         pos = match.span()
@@ -491,7 +493,7 @@ def rename_characteristic(temperature_trajs,):
 
 DEBUGGING_MODE = sys.monitoring.get_tool(sys.monitoring.DEBUGGER_ID) is not None
 if __name__ == "__main__":
-    model_strengths()
+    model_interventions()
 # Good lord
 # The original Code steps in 0.1 (absolute? idk) year steps through the solver (because the stepsize is far greater than the calibrated(?) t_end)
 # However, it takes its Temperature curve as if it made 1 year steps (every step a new year)

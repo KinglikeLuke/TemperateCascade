@@ -868,10 +868,10 @@ def intervention_analysis(state_df, timing_df):
     plt.show()
 
 def plot_influence_matrix(influence_matrix: ndarray[tuple[int, int, int], dtype[float64]], components, interventions,
-                          temperatures, plotname=None):
-    if len(influence_matrix.shape) == 2:
-        influence_matrix = np.expand_dims(influence_matrix, axis=-1)
-        temperatures = [[temperatures]]
+                          plotname=None):
+    # if len(influence_matrix.shape) == 2:
+    #     influence_matrix = np.expand_dims(influence_matrix, axis=-1)
+    #     temperatures = [[temperatures]]
     for i in range(influence_matrix.shape[-1]):
         # gridspec = plt.GridSpec()
         fig, axes = plt.subplots(1,4, width_ratios=(influence_matrix.shape[-2] - 1, 0.7, 1, 0.7),
@@ -904,22 +904,21 @@ def plot_influence_matrix(influence_matrix: ndarray[tuple[int, int, int], dtype[
         hatch_nan_cells(total_ax, total_values)
         total_ax.set_xticks([0], labels=["total"],rotation=45, ha="right", rotation_mode="anchor")
         plt.setp(total_ax.get_yticklabels(), visible=False)
-        fig.suptitle(f"ATE at T={temperatures[i][0]}°C", fontsize='medium')
+
         comp_cbar = fig.colorbar(component_heatmap, cax=comp_cmap_ax)
         comp_min = np.nanmin(influence_matrix[:, :-1, i])
         comp_max = np.nanmax(influence_matrix[:, :-1, i])
         comp_cbar.ax.set_ylim(comp_min - 0.01, comp_max)
-        calculate_clean_ticks(comp_min, comp_max, 5)
         comp_cbar.ax.set_yticks(calculate_clean_ticks(comp_min, comp_max, 4))
-        # comp_cbar.ax.set_yticks([comp_min, -0.1,  0, 0.1, comp_max])
         comp_cmap_ax.get_yaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
         total_cbar = fig.colorbar(total_heatmap, cax=total_cmap_ax)
         total_cbar.ax.set_ylim(vmin_total - 0.01, vmax_total + 0.01)
         total_cbar.ax.set_yticks(calculate_clean_ticks(vmin_total, vmax_total, 4))
+
+        fig.suptitle(f"ATE on {plotname}", fontsize='medium')
         #fig.tight_layout()
         if plotname:
-            fig.savefig(fr"C:\Users\lukas\Documents\PhD\Paper 1\numerical_data\analysis_results\Causal Effect\{temperatures[i][0]}{plotname}.png")
-    plt.show()
+            fig.savefig(fr"C:\Users\lukas\Documents\PhD\Paper 1\numerical_data\analysis_results\Causal Effect\{plotname}.png")
 
 def intervention_matrix(state_df):
     time = 50000
@@ -937,8 +936,10 @@ def intervention_matrix(state_df):
                     # .drop(["NINO", "REEF"], level="component")
                     # .drop(["REEF"], level="intervention"))
     _, pairwise_influence_matrix, temperatures = extract_influences(pairwise_series, interventions, components, mode="ATE")
-    plot_influence_matrix(influence_matrix - pairwise_influence_matrix, components,interventions, temperatures,
-                          f"second_order_infmatr{int(time/1000)}ka")
+    plot_influence_matrix(influence_matrix, components,interventions, f"VL trajectory")
+    plot_influence_matrix(influence_matrix - pairwise_influence_matrix, components, interventions,
+                          f"VL trajectory, second order effects")
+    plt.show()
 
 
 def network_effects(state_df):
@@ -1068,7 +1069,7 @@ def main():
     # state_plot(snapshot_df)
 
 OVERSHOOT_PROPERTIES = ["T_lim", "T_peak", "t_conv"]
-FOLDER = r"C:\Users\lukas\Documents\PhD\Paper 1\numerical_data\results\intervention\2026-08-26_2"
+FOLDER = r"C:\Users\lukas\Documents\PhD\Paper 1\numerical_data\results\intervention\2026-09-17_1"
 if __name__ == "__main__":
     main()
 

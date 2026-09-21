@@ -1,6 +1,5 @@
 from networkx import DiGraph
-import networkx as nx
-from core.coupling import cusp_derivative_coupling # TODO ugly hack
+from core.coupling import cusp_derivative_coupling
 import numpy as np
 
 
@@ -20,13 +19,6 @@ class tipping_network(DiGraph):
         self.nodes[old_element_idx].update(data = new_element)
         self._node[old_element_idx]['lambda_f'] = new_element.dxdt_diag()
         self._node[old_element_idx]['lambda_jac'] = new_element.jac_diag()
-        # Because of the way the couplings are implemented, we need to update the couplings with the new element params
-        # TODO change the way derivative couplings are implemented
-        for edge in list(self.edges(old_element_idx, data=True)):
-            coupling = edge[2]['data']
-            if isinstance(coupling, cusp_derivative_coupling):
-                self.remove_edge(edge[0], edge[1])
-                self.add_coupling(edge[0], edge[1], cusp_derivative_coupling(coupling._strength, new_element.get_par()))
 
     def add_coupling( self, from_id, to_id, coupling):
         super().add_edge( from_id, to_id, data = coupling)
@@ -47,6 +39,22 @@ class tipping_network(DiGraph):
     def get_number_tipped( self, x):
         return np.count_nonzero( self.get_tip_states( x ) )
 
+    def _derivative_coupling_matrix(self):
+        n = self.number_of_nodes()
+        derivative_couplings = np.zeros((n, n))
+        for from_id, to_id, edge_data in self.edges(data=True):
+            coupling = edge_data['data']
+            if isinstance(coupling, cusp_derivative_coupling):
+                derivative_couplings[to_id, from_id] = coupling.strength
+        return derivative_couplings
+
+    def _apply_derivative_couplings(self, rhs):
+        derivative_couplings = self._derivative_coupling_matrix()
+        if not derivative_couplings.any():
+            return rhs
+        lhs = np.eye(self.number_of_nodes()) - derivative_couplings
+        return np.linalg.solve(lhs, rhs)
+
     def f( self, t, x):
         f = np.zeros( self.number_of_nodes() )
         for node in self.nodes(data=True):
@@ -56,9 +64,11 @@ class tipping_network(DiGraph):
         for edge in self.edges(data=True):
             from_id = edge[0]
             to_id = edge[1]
+            if isinstance(edge[2]['data'], cusp_derivative_coupling):
+                continue
             lmd = edge[2]['lambda_f']
             f[to_id] += lmd.__call__( t, x[from_id], x[to_id])
-        return f
+        return self._apply_derivative_couplings(f)
 
     def jac(self, t, x):
         jac = np.zeros((self.number_of_nodes(), self.number_of_nodes()))
@@ -69,11 +79,13 @@ class tipping_network(DiGraph):
         for edge in self.edges(data=True):
             from_id = edge[0]
             to_id = edge[1]
+            if isinstance(edge[2]['data'], cusp_derivative_coupling):
+                continue
             lmd = edge[2]['lambda_jac']
             jac[to_id, from_id] = lmd.__call__( t, x[from_id], x[to_id] )
             lmd_diag = edge[2]['lambda_jac_diag']
             jac[to_id, to_id] += lmd_diag.__call__( t, x[from_id], x[to_id] )
-        return jac
+        return self._apply_derivative_couplings(jac)
 
     def compute_impact_matrix(self):
         n = self.number_of_nodes()
