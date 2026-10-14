@@ -38,6 +38,8 @@ def individual_timescales(earth_params, temp_offset=2.0):
         element_data.c.set_x(calibration_temp)
 
         threshold = 0 if element_data.c.get_x1() else 1 # Monostable elements are only to be pushed over their midpoint
+        # Also, the actual equilibrium point is always bigger than 1. This is, again, a bit sketch as the precise
+        # location and therefore relaxation time depends on the temperature at the tipping threshold
         def threshold_event(t, y):
             return y[0] - threshold
         threshold_event.terminal = True

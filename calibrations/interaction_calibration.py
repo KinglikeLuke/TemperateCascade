@@ -63,8 +63,13 @@ def intervention_effect(cause:t_cusp, effect:tipping_element, coupling_strength,
     intervention_state = [-1, -1] if derivative else [-1, 1]
     t = (0, 10000)
 
+    def threshold_event(t, y):
+        return y[0]
+    threshold_event.terminal = True
+    threshold_event.direction = 1
+
     # idk if the equation is actually stiff, but lsoda with jac is an order of magnitude faster than solve_ivp
-    intervention_sol = solve_ivp(intervention_net.f, t, intervention_state, jac=intervention_net.jac, method='LSODA', events=lambda t, x: x[0])
+    intervention_sol = solve_ivp(intervention_net.f, t, intervention_state, jac=intervention_net.jac, method='LSODA', events=threshold_event)
     tip_intervention = len(intervention_sol.t_events[0]) > 0 # if the effect ever tipped, it gets registered
     # P(A') = P(B|A') + P(A and not B) 
     # This produces a fun correlation: because B tips faster than A, there is the correlation A tipped first -> B probably won't tip
@@ -134,18 +139,17 @@ def force_strict_mono(array):
             prev = array[i]
     return monotonic
 
-def calibrate_interaction(cause:str, effect:str, derivative:bool, n_interaction_strengths:int=100):
+def calibrate_interaction(cause:str, effect:str, derivative:bool, n_interaction_strengths:int=101):
     limit = LIMITS[f"pf_{cause}_to_{effect}"]
     interaction_limit = [0, 1]
     pf = []
     total_isolated_tips = 0
     if limit[0] < 1:
-        interaction_limit[0] = -1
-        if limit[1] <= 1:
-            interaction_limit[1] = 0
-        else:
-            # if I have to scan both directions I need more granularity
-            n_interaction_strengths = 200
+        interaction_limit = [0, -1]
+    interaction_facs: list = [np.linspace(*interaction_limit, n_interaction_strengths)]
+    if limit[0] < 1 < limit[1]:
+        # if I have to scan both directions I go first toward -1, then toward 1. To break in both directions I need list
+        interaction_facs.append(-interaction_facs[0][1:])
 
     temperatures = []
     T_0 = 1
@@ -165,23 +169,27 @@ def calibrate_interaction(cause:str, effect:str, derivative:bool, n_interaction_
             tip_isolated = intervention_effect(cause_element, effect_element, 0, derivative)
             total_isolated_tips += tip_isolated
 
-    interaction_facs = np.linspace(*interaction_limit, n_interaction_strengths)
-    for i, interaction_fac in enumerate(tqdm.tqdm(interaction_facs)):
-        n_intervention = 0
-        for params in new_params.iterrows():
-            earth_params = params[1].to_dict()
-            for temperature in temperatures:
-                cause_element, effect_element = initialize_elements(cause, effect, temperature, earth_params)
-                interaction_strength = interaction_fac / earth_params[f"{effect}_time"]
-                if derivative:
-                    interaction_strength *= earth_params[f"{cause}_time"]
-                tip_intervention = intervention_effect(cause_element, effect_element, interaction_strength, derivative)
-                n_intervention += tip_intervention
-        pf.append(n_intervention/total_isolated_tips)
-        if n_intervention/total_isolated_tips > limit[1]:
-            interaction_facs = interaction_facs[:i+1]
-            break
-    pf = np.array(pf)
+    for n_run in range(len(interaction_facs)):
+        for j, interaction_fac in enumerate(tqdm.tqdm(interaction_facs[n_run])):
+            n_intervention = 0
+            for params in new_params.iterrows():
+                earth_params = params[1].to_dict()
+                for temperature in temperatures:
+                    cause_element, effect_element = initialize_elements(cause, effect, temperature, earth_params)
+                    interaction_strength = interaction_fac / earth_params[f"{effect}_time"]
+                    if derivative:
+                        interaction_strength *= earth_params[f"{cause}_time"]
+                    tip_intervention = intervention_effect(cause_element, effect_element, interaction_strength, derivative)
+                    n_intervention += tip_intervention
+            new_pf = n_intervention/total_isolated_tips
+            pf.append(new_pf)
+            if new_pf > limit[1] or new_pf < limit[0] or np.isclose(n_intervention/(len(temperatures)*new_params.shape[0]), 1, 0.05):
+                interaction_facs[n_run] = interaction_facs[n_run][:j+1]
+                break
+    # put results back in the right order
+    interaction_facs = np.concatenate(interaction_facs)
+    pf = np.array(pf)[np.argsort(interaction_facs)]
+    interaction_facs = np.sort(interaction_facs)
     strictly_monotonic = force_strict_mono(pf)
     df = pd.DataFrame({"pf": pf[strictly_monotonic], "interaction_fac": interaction_facs[strictly_monotonic]})
     return df, f"{cause}_to_{effect}"
@@ -220,48 +228,4 @@ full_df.columns.names = ["component", "axis"]
 full_df.to_csv("interaction_calibration.csv")
 # TODO If only a single value gets accepted the calibration completely blows up
 # TODO stabilizing effects on bistable elements are far too extreme
-# for params in input_file:
-#     values = list(map(float, params)) # -1 is the mc_dir
-#     earth_params = dict(zip(KEYS, values))
-#     gis = cusp(a=-1.0 / earth_params["gis_time"], b=1.0 / earth_params["gis_time"],
-#                     c=(1.0 / earth_params["gis_time"]) * global_functions.CUSPc(0., earth_params["limits_gis"], temperature))
-#     thc = cusp(a=-1.0 / earth_params["thc_time"], b=1.0 / earth_params["thc_time"],
-#                      c=(1.0 / earth_params["thc_time"]) * global_functions.CUSPc(0., earth_params["limits_thc"], temperature))
-#     wais = cusp(a=-1.0 / earth_params["wais_time"], b=1.0 / earth_params["wais_time"],
-#                     c=(1.0 / earth_params["wais_time"]) * global_functions.CUSPc(0., earth_params["limits_wais"], temperature))
-#     # amaz = cusp(a=-1.0 / earth_params.amaz_time, b=1.0 / earth_params.amaz_time,
-#     #                 c=(1.0 / earth_params.amaz_time) * global_functions.CUSPc(0., earth_params.limits_amaz, temperature))
-#     # nino = linear(a=-1 / earth_params.nino_time, c=(1.0 / earth_params.nino_time) * global_functions.CUSPc(0., earth_params.limits_nino, temperature), x_0=-1.0)
-#     # assi = linear(a=-1 / earth_params.assi_time, c=(1.0 / earth_params.assi_time) * global_functions.CUSPc(0., earth_params.limits_assi, temperature), x_0=-1.0)
-#     isolated_effect += free_run(wais, thc, 0)
-#     for i, interaction_fac in enumerate(interaction_facs):
-#         interaction_strength = interaction_fac / earth_params["thc_time"] * earth_params["wais_time"]
-#         tip_intervention = intervention_effect(wais, thc, interaction_strength)
-#         n_intervention[i] += tip_intervention
-#         # n_effect[i] += free_run(wais, gis, interaction_strength)
-# # This falls apart due to the wonky question design: the temperature dependence of both leads to correlations that were excluded by the questionnaire
-# # To wit: if you tell me that the WAIS melts before the GIS, I know that temperatures must be too low for GIS to melt
-# n_trials = input_file.shape[0]
-# # pf = ((n_effect_after_cause/n_cause_first)/(n_effect/n_trials))
-# # plt.plot(interaction_facs, n_trials/n_effect, label="1/P(B)", color="tab:orange")
-# # plt.axhline(1, color="tab:orange")
-# pf = n_intervention/isolated_effect
-# p_intervention =  n_intervention/n_trials
-# odds = p_intervention/(1-p_intervention) # oddly enough, *inverse* odds -- odds against -- produce a linear relationship (until they hit 0)
-# plt.plot(interaction_facs, pf, label="1/Probability Factor")
-# # because I fit the inverse max and min and directions are switched
-# # right_linear_edge = np.where(pf < 0.9*np.max(pf))[0][-1]
-# # left_linear_edge = np.where(pf > 1.1*np.min(pf))[0][0]
-# # linear_area = np.zeros(pf.shape, dtype=bool)
-# # linear_area[left_linear_edge:right_linear_edge] = 1
 
-# pf_array = np.linspace(0.2, 12, 500)
-# interaction_interpolation = np.interp(pf_array, pf[strictly_monotonic], interaction_facs[strictly_monotonic], left=np.nan, right=np.nan)
-# plt.plot(interaction_interpolation, pf_array, label="interpolation")
-# # assuming constant error in pf
-# # fit, _ = curve_fit(linear_fct, interaction_facs[linear_area], 1/pf[linear_area], sigma=1/pf[linear_area]**2)
-# # print(fit)
-# # plt.plot(interaction_facs[linear_area], linear_fct(interaction_facs[linear_area], *fit))
-# plt.legend()
-# plt.xlabel(r"Derivative coupling strength / $\tau_\mathrm{cause}$")
-# plt.show()

@@ -35,14 +35,15 @@ ELEMENTS["pf_PERM_to_AMOC"] = [1, 1.5]
 ELEMENTS["pf_AWSI_to_AMOC"] = [1, 3]
 # elements["pf_ASSI_to_AMOC"] = [0.1, 0.5]
 # TO WAIS. Generally, WAIS tips so often in an "intermediate" temperature trajectory that any factor greater than 2 is unattainable
-ELEMENTS["pf_NINO_to_WAIS"] = [1, 5] # TODO rerun with 5
+ELEMENTS["pf_NINO_to_WAIS"] = [1, 5]
 ELEMENTS["pf_AMOC_to_WAIS"]= [1, 1.5]
-ELEMENTS["pf_GIS_to_WAIS"]= [1, 5.0] # ultra sketch. I dont know how they imagine a tenfold increase between ice sheets (having very similar limiting temperature and all...)
+# TODO
+ELEMENTS["pf_GIS_to_WAIS"]= [1, 10 ] # ultra sketch. I dont know how they imagine a tenfold increase between ice sheets (having very similar limiting temperature and all...)
 #TO AMAZ
-ELEMENTS["pf_NINO_to_Amazonas"] = [1, 10]
+ELEMENTS["pf_NINO_to_Amazonas"] = [1, 10] # TODO
 ELEMENTS["pf_AMOC_to_Amazonas"]= [0.5, 1] # sketch. Probably stabilizing, regional variations
 #TO NINO
-ELEMENTS["pf_AMOC_to_NINO"] = [0.1, 0.2]
+ELEMENTS["pf_AMOC_to_NINO"] = [1, 2]
 # # TO ASSI
 ELEMENTS["pf_AWSI_to_PERM"] = [1, 2]
 ELEMENTS["pf_AMOC_to_AWSI"] = [0.3, 1]
@@ -63,7 +64,7 @@ ELEMENTS["PERM_time"]=[10, 300]
 # elements["ASSI_time"]=[10,50]
 
 def update_limits():
-    with open("limits.json", "w") as file:
+    with open(r"C:\Users\lukas\Documents\PhD\Paper 1\TemperateCascade\start_ensemble\limits.json", "w") as file:
         json.dump(ELEMENTS, file)
 
 

@@ -3,7 +3,10 @@ import os
 import sys
 import re
 import json
-
+import glob
+from pathlib import Path
+import cProfile
+from dataclasses import dataclass
 sys.path.append('')
 
 # global imports
@@ -14,8 +17,6 @@ import seaborn as sns
 sns.set(font_scale=1.)
 import itertools
 import datetime
-import glob
-from pathlib import Path
 # from PyPDF2 import PdfMerger # dont really know what I would want with the merged PDFs
 from scipy.integrate import solve_ivp, quad
 from tqdm import tqdm
@@ -46,7 +47,7 @@ N_STEPS = 1000
 T_0 = 1.0
 N_OVERSHOOTS = 200
 TEMPERATURE_TRAJECTORY_KIND = "forcing" # os.environ.get("TEMPERATURE_TRAJECTORY_KIND", "overshoot").lower()
-FORCING_PROJECTION_PATH = r"temp_input\trajectories\temperature_VL.csv"#os.environ.get("FORCING_PROJECTION_PATH", r"temp_input\trajectories")
+FORCING_PROJECTION_PATH = r"temp_input\trajectories\temperature_HL.csv"#os.environ.get("FORCING_PROJECTION_PATH", r"temp_input\trajectories")
 FORCING_TIME_COLUMN = "timebounds" #os.environ.get("FORCING_TIME_COLUMN") or None
 FORCING_TEMPERATURE_COLUMN = "*" # os.environ.get("FORCING_TEMPERATURE_COLUMN") or None
 FORCING_TIME_ZERO = 2020 # os.environ.get("FORCING_TIME_ZERO")
@@ -114,160 +115,161 @@ def set_colormap(ax, data_length):
     else: ax_colormap.set_axis_off()  
 
 ################################# MAIN LOOP #################################
+@dataclass(frozen=True)
+class SimulationCase:
+    index_values: tuple
+    strength: float = 1.0
+    intervention: str | None = None
+    intervention_state: float | None = None
+    isolated_intervention: bool = False
+
+
+@dataclass(frozen=True)
+class ExperimentSpec:
+    name: str
+    temperature_mode: str
+    case_index_names: tuple[str, ...]
+    cases: tuple[SimulationCase, ...]
+
+    @property
+    def index_names(self):
+        return ["lhc", "T_peak", "T_lim", "t_conv", *self.case_index_names, "component"]
+
+
 def model_strengths():
-    # Saving, folder creation only once first run goes through
-    coupling_strengths = [0, 1]
-    directory_name = prepare_folder("strengths")
-
-    index = pd.MultiIndex.from_arrays(
-        [[], [], [], [], [], []],
-        names=["lhc", "T_peak", "T_lim", "t_conv", "strength", "component"]
+    strength_cases = tuple(
+        SimulationCase(index_values=(strength,), strength=strength)
+        for strength in (0, 1)
     )
-    tipping_df = pd.DataFrame({}, index=index)
-    timing_df = pd.DataFrame({"tip_time": pd.Series(dtype="float64")}, index=index)
+    run_model_experiment(
+        ExperimentSpec(
+            name="strengths",
+            temperature_mode="grid",
+            case_index_names=("strength",),
+            cases=strength_cases,
+        )
+    )
 
-    temperature_inputs = prepare_temperature_inputs(mode="grid")
-    for i, sys_var in enumerate(tqdm(input_file.iterrows(), total=input_file.shape[0])):
-        conv_fac_gis, earth_params = prepare_earth_params(sys_var)
-        state_output = {}
-        timing_output = {}
-        for temperature_input in temperature_inputs:
-            T_peak = temperature_input["T_peak"]
-            T_lim = temperature_input["T_lim"]
-            t_conv = temperature_input["t_conv"]
-            for j, strength in enumerate(coupling_strengths):
-                # How many points are to be calculated. odeint's precision is mostly independent of this, taking adaptive steps
-                # scale the temperature properly
-                forcing = scale_forcing(temperature_input["forcing"], conv_fac_gis)
-                net, node_dict = earth_network(earth_params, forcing, strength, 1, 1, 1) # here be ks
-                initial_state = -1*np.ones(len(net.nodes)) #initial state
-
-                state_results, tip_times = simulate_network(net, initial_state, conv_fac_gis)
-                # saving structure: configuration x features x time
-                if np.any(np.isnan(state_results)):
-                    raise RuntimeError("NaN in solution")
-                for l, component in enumerate(node_dict.keys()):
-                    state_output[i, T_peak, T_lim, t_conv, strength, component] = state_results[l]
-                    timing_output[i, T_peak, T_lim, t_conv, strength, component] = tip_times[l]
-                state_output[i, T_peak, T_lim, t_conv, strength, "total"] = state_results[-1]
-        tipping_df = state_results_to_df(state_output, tipping_df)
-        timing_df = timing_results_to_df(timing_output, timing_df)
-
-        if not DEBUGGING_MODE: # to stop it from cluttering my workspace with folders
-            if not os.path.isdir(directory_name): # if this is the first time we get here - whether the name fits is decided before the run
-                os.makedirs(directory_name)
-            tipping_df.to_csv(f"{directory_name}/dataframe.csv")
-            timing_df.to_csv(f"{directory_name}/timing_dataframe.csv")
-
-    input_file.to_csv(f"{directory_name}/tipping_properties.csv")
-
-    # current_dir = os.getcwd()
-    # os.chdir("{}/network_{}_{}_{}/".format(long_save_name, kk[0], kk[1], kk[2]))
-    # pdfs = np.array(np.sort(glob.glob("feedbacks_*.pdf"), axis=0))
-    # if len(pdfs) != 0.:
-    #     merger = PdfMerger()
-    #     for pdf in pdfs:
-    #         merger.append(pdf)
-    #     merger.write("feedbacks_complete.pdf")
-    #     merger.close()
-    #     for filename in glob.glob("time_d*.pdf"):
-    #         os.remove(filename)
-    #     print("Complete PDFs merged")
-    # os.chdir(current_dir)
-
-    # idk what this does. seems like a worse version of the upper saveloop
-    # for keyword in ["close", "medium", "far"]:
-    #     filenames = glob.glob(f"{path}/*{keyword}.npy")
-    #     n_temps = len(filenames)
-    #     results_array = np.zeros((n_temps, *np.load(filenames[0]).shape))
-    #     characteristics =  np.zeros(n_temps)
-    #     for i, filename in enumerate(filenames):
-    #         data = np.load(filename)
-    #         match = re.search(r'([0-9]+\.[0-9]+)(?!.*[0-9]+\.[0-9]+)', filename)
-    #         results_array[i] = data
-    #         characteristic = match.group(1)
-    #         characteristics[i] = float(characteristic)
-    #     strengths = np.arange(0.0, 1.01, 0.1)
-    #     components = ["time", "gis", "thc", "wais", "amaz", "nino", "total"]
-    #     index = pd.MultiIndex.from_product([characteristics, strengths, components], names=["characteristic", "strength", "component"])
-    #     results_df = pd.DataFrame({"value": results_array.reshape(-1)}, index=index)
-    #     results_df = results_df.drop(index="time", level="component")
-    #     results_df.to_csv(f"{keyword}.csv")
-
-    print("Finish")
 
 def model_interventions():
     """
-    Performs do-interventions on the network with every tipping element, once tipped, once untipped.
-    Returns:
-
+    Performs do-interventions on the network with every tipping element,
+    once tipped, once untipped, and once at the threshold.
     """
-    interventions = COMPONENTS # Amazonas has no outgoing connections. Therefore, it cannot have a causal effect
-    intervention_states = [-1, 0, 1]
-    folder = prepare_folder("intervention")
-
-    index = pd.MultiIndex.from_arrays(
-        [[], [], [], [], [], [], [], []],
-        names=["lhc", "T_peak", "T_lim", "t_conv", "intervention", "state", "strength", "component"]
+    intervention_cases = tuple(
+        SimulationCase(
+            index_values=(element, state, connection_strength),
+            intervention=element,
+            intervention_state=state,
+            isolated_intervention=connection_strength == 0,
+        )
+        for element, state, connection_strength in itertools.product(COMPONENTS, [-1, 0, 1], [0, 1])
     )
-    tipping_df = pd.DataFrame({}, index=index)
-    timing_df = pd.DataFrame({}, index=index)
+    run_model_experiment(
+        ExperimentSpec(
+            name="intervention",
+            temperature_mode="flat",
+            case_index_names=("intervention", "state", "strength"),
+            cases=intervention_cases,
+        )
+    )
 
-    temperature_inputs = prepare_temperature_inputs(mode="flat")
-    for i, sys_var in enumerate(tqdm(input_file.iterrows(), total=input_file.shape[0])):
-        conv_fac_gis, earth_params = prepare_earth_params(sys_var)
 
+def run_model_experiment(spec: ExperimentSpec):
+    folder = prepare_folder(spec.name)
+    tipping_df, timing_df = empty_result_frames(spec.index_names)
+    temperature_inputs = prepare_temperature_inputs(mode=spec.temperature_mode)
+
+    for lhc_index, sys_var in enumerate(tqdm(input_file.iterrows(), total=input_file.shape[0])):
+        conv_fac_gis, base_earth_params = prepare_earth_params(sys_var)
         state_output = {}
         timing_output = {}
-        for temperature_input in temperature_inputs:
-            T_peak = temperature_input["T_peak"]
-            T_lim = temperature_input["T_lim"]
-            t_conv = temperature_input["t_conv"]
-            for j, intv_element in enumerate(interventions):
-                for k, intv_state in enumerate(intervention_states):
-                    for intv_con_strength in (0, 1):
-                        earth_params_original = earth_params.copy()
-                        for key in LIMITS.keys():
-                            if key.startswith(f"pf_") and not key.startswith(f"pf_{intv_element}"):
-                                # 0 means isolated interaction (PF of 1 everywhere but intervention),
-                                # 1 means normal (maximally strong) interaction
-                                if intv_con_strength == 0:
-                                    earth_params[key] = 1
-                                # else
-                                #   earth_params[key] = LIMITS[key][np.argmax(np.abs(np.array(LIMITS[key]) - 1))]
-                        # scale the temperature properly
-                        forcing = scale_forcing(temperature_input["forcing"], conv_fac_gis)
-                        net, node_dict = earth_network(earth_params, forcing, strength=1, kk0=1, kk1=1, kk2=1)
-                        # TODO TEST!!!
-                        net, initial_state = intervene_in_network(net, intv_element, intv_state, node_dict)
 
-                        state_results, tip_times = simulate_network(net, initial_state, conv_fac_gis)
-                        #saving structure: configuration x features x time
-                        if np.any(np.isnan(state_results)):
-                            raise RuntimeError("NaN in solution")
-                        # TODO TEST!!!
-                        for l, component in enumerate(node_dict.keys()):
-                            state_output[i, T_peak, T_lim, t_conv, intv_element, intv_state, intv_con_strength, component] \
-                                = state_results[l]
-                            timing_output[i, T_peak, T_lim, t_conv, intv_element, intv_state, intv_con_strength, component] \
-                                = tip_times[l]
-                        state_output[i, T_peak, T_lim, t_conv, intv_element, intv_state, intv_con_strength, "total"] \
-                            = state_results[-1]
-                        earth_params = earth_params_original
+        for temperature_input, case in itertools.product(temperature_inputs, spec.cases):
+            run_single_case(
+                lhc_index,
+                temperature_input,
+                case,
+                base_earth_params,
+                conv_fac_gis,
+                state_output,
+                timing_output,
+            )
 
-            # state_output.append(state_record) # shape: temp_dim x interventions x components x time
-            # timing_output.append(timing_record) # shape: temp_dim x interventions x components
-
-        tipping_df = state_results_to_df(state_output, tipping_df) # these modify the df in place
+        tipping_df = state_results_to_df(state_output, tipping_df)
         timing_df = timing_results_to_df(timing_output, timing_df)
-        # TODO somethings fucked with the Amazon intervetion
-        if not DEBUGGING_MODE: # to stop it from cluttering my workspace with folders
-            if not os.path.isdir(folder): # if this is the first time we get here - whether the name fits is decided before the run
-                os.makedirs(folder)
-            tipping_df.to_csv(f"{folder}/dataframe.csv")
-            timing_df.to_csv(f"{folder}/timing_dataframe.csv")
+        save_progress(folder, tipping_df, timing_df)
 
     input_file.to_csv(f"{folder}/tipping_properties.csv")
+    print("Finish")
+
+
+def empty_result_frames(index_names):
+    index = pd.MultiIndex.from_arrays([[] for _ in index_names], names=index_names)
+    return pd.DataFrame({}, index=index), pd.DataFrame({}, index=index)
+
+
+def run_single_case(
+    lhc_index,
+    temperature_input,
+    case: SimulationCase,
+    base_earth_params,
+    conv_fac_gis,
+    state_output,
+    timing_output,
+):
+    forcing = scale_forcing(temperature_input["forcing"], conv_fac_gis)
+    earth_params = earth_params_for_case(base_earth_params, case)
+    net, node_dict = earth_network(earth_params, forcing, case.strength, 1, 1, 1)
+    initial_state = -1 * np.ones(len(net.nodes))
+
+    if case.intervention is not None:
+        net, initial_state = intervene_in_network(net, case.intervention, case.intervention_state, node_dict)
+
+    state_results, tip_times = simulate_network(net, initial_state, conv_fac_gis)
+    if np.any(np.isnan(state_results)):
+        raise RuntimeError("NaN in solution")
+
+    base_index = temperature_case_index(lhc_index, temperature_input, case)
+    record_case_results(base_index, node_dict, state_results, tip_times, state_output, timing_output)
+
+
+def earth_params_for_case(base_earth_params, case: SimulationCase):
+    earth_params = base_earth_params.copy()
+    if case.isolated_intervention:
+        # Isolated interaction: probability factors are neutral except outgoing links from the intervention.
+        for key in LIMITS.keys():
+            if key.startswith("pf_") and not key.startswith(f"pf_{case.intervention}_"):
+                earth_params[key] = 1
+    return earth_params
+
+
+def temperature_case_index(lhc_index, temperature_input, case: SimulationCase):
+    return (
+        lhc_index,
+        temperature_input["T_peak"],
+        temperature_input["T_lim"],
+        temperature_input["t_conv"],
+        *case.index_values,
+    )
+
+
+def record_case_results(base_index, node_dict, state_results, tip_times, state_output, timing_output):
+    for component_index, component in enumerate(node_dict.keys()):
+        result_index = (*base_index, component)
+        state_output[result_index] = state_results[component_index]
+        timing_output[result_index] = tip_times[component_index]
+    state_output[(*base_index, "total")] = state_results[-1]
+
+
+def save_progress(folder, tipping_df, timing_df):
+    if DEBUGGING_MODE:
+        return
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    tipping_df.to_csv(f"{folder}/dataframe.csv")
+    timing_df.to_csv(f"{folder}/timing_dataframe.csv")
+
 
 def simulate_network(net, initial_state, conv_fac_gis):
     # t_end given in years; also possible to use equilibrate method
@@ -282,7 +284,8 @@ def simulate_network(net, initial_state, conv_fac_gis):
     # Big Savefile - around 100 MB. Too large for a csv, a pkl will make much less hassle
     tip_times = [t_event[0] * conv_fac_gis if len(t_event) > 0 else np.nan for t_event in solution.t_events]
     # tip_nino = [y_event[-1][0] if len(y_event)>0 else np.nan for y_event in solution.y_events]
-    total_tipped = np.array([net.get_number_tipped(timeseries) for timeseries in sol])
+    # dont use the total tipped anyway
+    total_tipped = np.zeros(sol.shape[0])#np.array([net.get_number_tipped(timeseries) for timeseries in sol])
     state_results = np.concatenate((sol, total_tipped[:, np.newaxis]), axis=1).T
     return state_results, tip_times
 
@@ -491,12 +494,9 @@ def rename_characteristic(temperature_trajs,):
 
         os.rename(filename, new_filename)
 
+
 DEBUGGING_MODE = sys.monitoring.get_tool(sys.monitoring.DEBUGGER_ID) is not None
 if __name__ == "__main__":
+    #cProfile.run("model_interventions()", "new_profile.prof", sort="cumtime")
+
     model_interventions()
-# Good lord
-# The original Code steps in 0.1 (absolute? idk) year steps through the solver (because the stepsize is far greater than the calibrated(?) t_end)
-# However, it takes its Temperature curve as if it made 1 year steps (every step a new year)
-# So the Temperature changes at 10x rate and the x-label is 10x too large. N.B. the concrete conversion factor is irrelevant in the original code as long as >10
-# My own code is consitent between timescales and shows a tipped GIS after only 200 years of 2C warming (which is a bit sketchy) - probably because one has to
-# re-norm the Temperature curve
