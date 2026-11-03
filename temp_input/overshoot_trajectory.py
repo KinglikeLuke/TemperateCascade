@@ -326,7 +326,7 @@ def fit_parameters(T0, Tmax, T_lim, tconv, mu0=0.0015):
         RuntimeError: _description_
 
     Returns:
-        _type_: _description_
+        _type_: R, mu0, mu1
     """
     eps = 1e-3
     # Somewhat hacky workaround: flat trajectories with tconv = 0

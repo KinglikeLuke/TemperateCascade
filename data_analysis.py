@@ -14,29 +14,26 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from plotly import graph_objects as go
 
-from temp_input.overshoot_trajectory import overshoot_trajectory
-
-
 OVERSHOOT_PROPERTIES = ["T_lim", "T_peak", "t_conv"]
 FOLDER = Path(
-    r"C:\Users\lukas\Documents\PhD\Paper 1\numerical_data\results\intervention\2026-09-22_temperature_HL_1"
+    r"C:\Users\lukas\Documents\PhD\Paper 1\numerical_data\results\strengths\2026-10-21_2"
 )
 TEMP_INPUT_PATH = Path(r"temp_input\Tpeak_tconv_values\temp_input_values.txt")
 INFLUENCE_OUTPUT_DIR = Path(
     r"C:\Users\lukas\Documents\PhD\Paper 1\numerical_data\analysis_results\Causal Effect"
 )
-
+OUTPUT_DIR = Path(r"C:\Users\lukas\Documents\PhD\Paper 1\Paper\figures")
 
 plt.rcParams.update({
     "text.usetex": True,
     "font.family": "sans-serif",
     "font.serif": ["Computer Modern"],
     "font.sans-serif": ["Latin Modern"],
-    "axes.labelsize": 14,
-    "font.size": 13,
-    "legend.fontsize": 11,
-    "xtick.labelsize": 11,
-    "ytick.labelsize": 11,
+    "axes.labelsize": 10,
+    "font.size": 10,
+    "legend.fontsize": 10,
+    "xtick.labelsize": 10,
+    "ytick.labelsize": 10,
     "ytick.direction": "out",
     "xtick.direction": "out",
     "figure.constrained_layout.use": True,
@@ -166,6 +163,8 @@ class NetworkEffectsConfig:
     )
     sankey_transition: NetworkTransition = NetworkTransition("WAIS", "AMOC")
     sankey_strength: float = 1.0
+    output_dir: Path | None = None
+    plotname: str | None = None
 
 
 def set_plot_size(width_type: str, fraction: float = 1, subplots: tuple[int, int] = (1, 1)) -> tuple[float, float]:
@@ -245,8 +244,7 @@ def temperature_points(df: pd.DataFrame | pd.Series) -> np.ndarray:
 
 def overshoot_plot(ax: Axes) -> None:
     vals = {"T_lim": 1.0, "t_conv": 300, "T_peak": 4.0}
-    row = temp_idx_df.loc[tuple(vals[key] for key in temp_idx_df.index.names)]
-    forcing = lambda t: overshoot_trajectory(t, 1.0, row["T_lim"], row["R"], row["mu_0"], row["mu_1"])
+    forcing = lambda t: overshoot_trajectory_direct(t, 1.0, **vals)
     time = np.linspace(0, 500, 100)
     inner_color = "w"
     arrowprops = dict(arrowstyle="-", color=inner_color, shrinkA=0, shrinkB=1, lw=0.5)
@@ -324,19 +322,20 @@ def extract_influences(
                     > 0
                 )
                 no_tip = manual_total.xs(-1, level="state").groupby(level=["lhc", *OVERSHOOT_PROPERTIES]).sum()
-                tip = manual_total.xs(0, level="state").groupby(level=["lhc", *OVERSHOOT_PROPERTIES]).sum()
+                tip = manual_total.xs(1, level="state").groupby(level=["lhc", *OVERSHOOT_PROPERTIES]).sum()
             else:
                 no_tip = (
                     state_series.xs((intervention, -1, component), level=["intervention", "state", "component"])
                     > 0
                 ).astype(int)
                 tip = (
-                    state_series.xs((intervention, 0, component), level=["intervention", "state", "component"])
+                    state_series.xs((intervention, 1, component), level=["intervention", "state", "component"])
                     > 0
                 ).astype(int)
 
             tip_mean = tip.groupby(level=OVERSHOOT_PROPERTIES).mean()
             no_tip_mean = no_tip.groupby(level=OVERSHOOT_PROPERTIES).mean()
+
             if influence_depth == 1:
                 tip_mean = pd.Series([tip_mean.mean()], index=pd.MultiIndex.from_arrays(x_plot.T, names=OVERSHOOT_PROPERTIES))
                 no_tip_mean = pd.Series(
@@ -438,7 +437,7 @@ class AnalysisPlotter:
         inset_indicator.connectors[1].set(visible=True)
         inset_indicator.connectors[3].set(visible=False)
         inset_indicator.rectangle.set(edgecolor="w")
-        overshoot_plot(overshoot_ax)
+#        overshoot_plot(overshoot_ax)
 
     def state_plot(self, state_df: pd.DataFrame | pd.Series, show: bool = True) -> tuple[Figure, list[Axes]]:
         x_plot = temperature_points(state_df)
@@ -460,7 +459,7 @@ class AnalysisPlotter:
                 {"value": impact_component},
                 index=pd.MultiIndex.from_arrays(x_plot.T, names=OVERSHOOT_PROPERTIES),
             )
-            cfgs[component] = prepare_impact_plot(impact_df)
+            cfgs[component] = prepare_impact_plot(impact_df, t_limits=[0, 1, 2])
 
         total_titles = [f"{chr(97 + i)}) {title}" for i, title in enumerate(cfgs["total"].titles)]
         total_grid = cfgs["total"].with_titles(total_titles)
@@ -541,7 +540,7 @@ class AnalysisPlotter:
             self._configure_influence_colorbar(fig, total_heatmap, total_cmap_ax, total_values, config.mode, 3)
 
             if config.plotname:
-                fig.suptitle(f"{config.mode} on {config.plotname}", fontsize="medium")
+                # fig.suptitle(f"Causal effect on {config.plotname} trajectory, ", fontsize="medium")
                 if config.output_dir:
                     config.output_dir.mkdir(parents=True, exist_ok=True)
                     fig.savefig(config.output_dir / f"{config.mode},{config.plotname}.png")
@@ -573,7 +572,7 @@ class AnalysisPlotter:
                 ax.imshow(matrix, cmap="plasma", vmin=0, vmax=1)
                 ax.set_xticks(
                     np.arange(2),
-                    labels=["B stable\nif A tips", "B tips\nif A tips"],
+                    labels=["B stable\nif A tiped", "B tips\nif A tiped"],
                     rotation=90,
                     fontsize="small",
                 )
@@ -595,6 +594,8 @@ class AnalysisPlotter:
         if show:
             plt.show()
             sankey_fig.show()
+        if config.output_dir:
+            fig.savefig(config.output_dir / f"transfer_matrix,{config.plotname}.png")
         return fig, sankey_fig
 
     def sankey(self, tip_series: pd.Series, transition: NetworkTransition, strength: float) -> go.Figure:
@@ -732,8 +733,9 @@ def plot_influence_matrix(
     return AnalysisPlotter().plot_influence_matrix(influence_matrix, components, interventions, config)
 
 
-def state_plot(state_df: pd.DataFrame | pd.Series, show: bool = True) -> tuple[Figure, list[Axes]]:
-    return AnalysisPlotter().state_plot(state_df, show=show)
+def state_plot(state_df: pd.DataFrame | pd.Series, show: bool = True, time = 50_000) -> tuple[Figure, list[Axes]]:
+    state_series = state_df[time]
+    return AnalysisPlotter().state_plot(state_series, show=show)
 
 
 def intervention_matrix(
@@ -761,7 +763,7 @@ def intervention_matrix(
         result.matrix,
         components,
         interventions,
-        InfluenceMatrixPlotConfig(mode=mode),
+        InfluenceMatrixPlotConfig(mode=mode, output_dir=OUTPUT_DIR, plotname="HL"),
     )
     if show:
         plt.show()
@@ -770,7 +772,7 @@ def intervention_matrix(
 
 def network_effects(
     state_df: pd.DataFrame,
-    config: NetworkEffectsConfig = NetworkEffectsConfig(),
+    config: NetworkEffectsConfig = NetworkEffectsConfig(output_dir=OUTPUT_DIR, plotname="HL"),
     show: bool = True,
 ) -> tuple[Figure, go.Figure]:
     return AnalysisPlotter().network_effects(state_df, config=config, show=show)
@@ -790,8 +792,9 @@ def sankey(
 
 def main() -> None:
     state_df = load_longform_df(FOLDER / "dataframe.csv")
-    intervention_matrix(state_df)
-    network_effects(state_df)
+    # state_plot(state_df)
+    # intervention_matrix(state_df ,mode="ATE")
+    # network_effects(state_df)
 
 
 if __name__ == "__main__":

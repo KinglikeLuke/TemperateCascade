@@ -94,9 +94,9 @@ def earth_network(e_p: dict, temp, strength, kk0, kk1, kk2):
             continue
         if cause in ["WAIS", "GIS"] and effect == "AMOC":
             net.add_coupling(node_dict[cause], node_dict[effect],
-                             cusp_derivative_coupling(strength=(e_p[f'{cause}_time'] / e_p[f'{effect}_time'])*strength*
-                                                               pf_to_interaction(e_p, f'pf_{cause}_to_{effect}'),
-                                                      params=nodes[cause].get_par()))
+                             cusp_derivative_coupling(
+                                 strength=(e_p[f'{cause}_time'] / e_p[f'{effect}_time']) * strength *
+                                          pf_to_interaction(e_p, f'pf_{cause}_to_{effect}')))
         else:
             net.add_coupling(node_dict[cause], node_dict[effect],
                              linear_coupling(strength=(1.0 / e_p[f'{effect}_time']) * strength *

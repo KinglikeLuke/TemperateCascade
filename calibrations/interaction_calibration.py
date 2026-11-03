@@ -55,8 +55,7 @@ def intervention_effect(cause:t_cusp, effect:tipping_element, coupling_strength,
     intervention_net.add_element(intervention_cause)
     # implementation TODO: get_par() needs to be amended to make copy
     if derivative:
-        intervention_net.add_coupling(1, 0, cusp_derivative_coupling(strength=coupling_strength, 
-                                                            params=intervention_cause.get_par()))
+        intervention_net.add_coupling(1, 0, cusp_derivative_coupling(strength=coupling_strength))
     else:
         intervention_net.add_coupling(1, 0, linear_coupling(strength=coupling_strength))
 
@@ -169,7 +168,7 @@ def calibrate_interaction(cause:str, effect:str, derivative:bool, n_interaction_
             tip_isolated = intervention_effect(cause_element, effect_element, 0, derivative)
             total_isolated_tips += tip_isolated
 
-    for n_run in range(len(interaction_facs)):
+    for n_run in range(len(interaction_facs)): # towards 0 and towards +inf runs
         for j, interaction_fac in enumerate(tqdm.tqdm(interaction_facs[n_run])):
             n_intervention = 0
             for params in new_params.iterrows():

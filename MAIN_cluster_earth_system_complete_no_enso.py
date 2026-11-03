@@ -45,9 +45,8 @@ plus_minus_include = True    # from Kriegler, 2009: Unclear links; if False all 
 DURATION = 50000 #actual real simulation years
 N_STEPS = 1000
 T_0 = 1.0
-N_OVERSHOOTS = 200
-TEMPERATURE_TRAJECTORY_KIND = "forcing" # os.environ.get("TEMPERATURE_TRAJECTORY_KIND", "overshoot").lower()
-FORCING_PROJECTION_PATH = r"temp_input\trajectories\temperature_HL.csv"#os.environ.get("FORCING_PROJECTION_PATH", r"temp_input\trajectories")
+TEMPERATURE_TRAJECTORY_KIND = "overshoot" # os.environ.get("TEMPERATURE_TRAJECTORY_KIND", "overshoot").lower()
+FORCING_PROJECTION_PATH = r"temp_input\trajectories"#os.environ.get("FORCING_PROJECTION_PATH", r"temp_input\trajectories")
 FORCING_TIME_COLUMN = "timebounds" #os.environ.get("FORCING_TIME_COLUMN") or None
 FORCING_TEMPERATURE_COLUMN = "*" # os.environ.get("FORCING_TEMPERATURE_COLUMN") or None
 FORCING_TIME_ZERO = 2020 # os.environ.get("FORCING_TIME_ZERO")
@@ -136,7 +135,7 @@ class ExperimentSpec:
         return ["lhc", "T_peak", "T_lim", "t_conv", *self.case_index_names, "component"]
 
 
-def model_strengths():
+def model_strengths(temperature_mode="grid"):
     strength_cases = tuple(
         SimulationCase(index_values=(strength,), strength=strength)
         for strength in (0, 1)
@@ -144,14 +143,14 @@ def model_strengths():
     run_model_experiment(
         ExperimentSpec(
             name="strengths",
-            temperature_mode="grid",
+            temperature_mode=temperature_mode,
             case_index_names=("strength",),
             cases=strength_cases,
         )
     )
 
 
-def model_interventions():
+def model_interventions(temperature_mode="flat"):
     """
     Performs do-interventions on the network with every tipping element,
     once tipped, once untipped, and once at the threshold.
@@ -168,7 +167,7 @@ def model_interventions():
     run_model_experiment(
         ExperimentSpec(
             name="intervention",
-            temperature_mode="flat",
+            temperature_mode=temperature_mode,
             case_index_names=("intervention", "state", "strength"),
             cases=intervention_cases,
         )
@@ -184,6 +183,8 @@ def run_model_experiment(spec: ExperimentSpec):
         conv_fac_gis, base_earth_params = prepare_earth_params(sys_var)
         state_output = {}
         timing_output = {}
+        if spec.temperature_mode == "random":
+            temperature_inputs = prepare_temperature_inputs(mode=spec.temperature_mode)
 
         for temperature_input, case in itertools.product(temperature_inputs, spec.cases):
             run_single_case(
@@ -247,9 +248,7 @@ def earth_params_for_case(base_earth_params, case: SimulationCase):
 def temperature_case_index(lhc_index, temperature_input, case: SimulationCase):
     return (
         lhc_index,
-        temperature_input["T_peak"],
-        temperature_input["T_lim"],
-        temperature_input["t_conv"],
+        *[t_p[1] for t_p in temperature_input.items() if t_p[0] != "forcing"],
         *case.index_values,
     )
 
@@ -334,7 +333,7 @@ def prepare_projection_inputs():
             temperature_inputs.append({
                 "T_peak": projection["T_peak"],
                 "T_lim": projection["T_lim"],
-                "t_conv": projection["t_conv"],
+                "t_conv": os.path.splitext(os.path.basename(path))[0][-2:], # t_conv is always 2500, so we put the new info here
                 "forcing": projection["forcing"],
             })
     return temperature_inputs
@@ -372,13 +371,14 @@ def prepare_overshoots(mode="random"):
         T_lims = np.array([1.5, 2.0, 2.5])
         t_convs = np.array([0.0, 0.0, 0.0])
     elif mode == "random":
-        lhc_distr = np.array(lhs(3, samples=N_OVERSHOOTS))
+        n_overshoots = 200
+        lhc_distr = np.array(lhs(3, samples=n_overshoots))
         T_peaks = np.round(4 * lhc_distr[:, 0] + 2, 2)
         # T_lims = np.round(2*lhc_distr[:,1], 2)
         T_lims = np.round(2 * lhc_distr[:, 1], 2)  # for plotting in the T_lim plane
         t_convs = np.round(900 * lhc_distr[:, 2] + 100, 0)
         T_0s = np.full_like(T_peaks, T_0)  # Use global T_0 for non-flat scenarios
-    else:
+    elif mode == "grid":
         T_peaks_grid = np.arange(2., 6.1, 0.5)
         T_lims_grid = np.arange(0, 2.1, 0.5)
         t_convs_grid = np.arange(100, 1001, 100)
@@ -387,6 +387,8 @@ def prepare_overshoots(mode="random"):
         T_lims = T_lims_mesh.flatten()
         t_convs = t_convs_mesh.flatten()
         T_0s = np.full_like(T_peaks, T_0)  # Use global T_0 for non-flat scenarios
+    else:
+        raise ValueError(f"Invalid mode '{mode}'. Must be 'flat', 'random' or 'grid'.")
     return T_0s, T_lims, T_peaks, t_convs
 
 
@@ -498,5 +500,4 @@ def rename_characteristic(temperature_trajs,):
 DEBUGGING_MODE = sys.monitoring.get_tool(sys.monitoring.DEBUGGER_ID) is not None
 if __name__ == "__main__":
     #cProfile.run("model_interventions()", "new_profile.prof", sort="cumtime")
-
-    model_interventions()
+    model_strengths("random")
