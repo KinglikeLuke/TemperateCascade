@@ -26,7 +26,7 @@ from pydoe import lhs
 
 #private imports for earth system
 from earth_sys.timing_no_enso import individual_timescales
-from earth_sys.earth_no_enso import earth_network, earth_elements, intervene_in_network
+from earth_sys.build_earth import earth_network, earth_elements, intervene_in_network
 
 from temp_input.overshoot_trajectory import (
     overshoot_trajectory,
@@ -78,7 +78,6 @@ COMPONENTS = ["GIS", "AMOC", "WAIS", "Amazonas", "REEF", "AWSI", "PERM", "WAM", 
 ########################Declaration of variables from passed values#######################
 input_file = pd.read_csv(r"start_ensemble\latin_prob.txt", delimiter=",")
 startdate = str(datetime.datetime.now().date())
-
 #include uncertain "+-" links:
 if plus_minus_include == False:
     plus_minus_links = np.array(list(itertools.product([-1.0, 0.0, 1.0], repeat=3)))
@@ -199,7 +198,8 @@ def run_model_experiment(spec: ExperimentSpec):
 
         tipping_df = state_results_to_df(state_output, tipping_df)
         timing_df = timing_results_to_df(timing_output, timing_df)
-        save_progress(folder, tipping_df, timing_df)
+        if lhc_index % 20 == 0:
+            save_progress(folder, tipping_df, timing_df)
 
     input_file.to_csv(f"{folder}/tipping_properties.csv")
     print("Finish")
@@ -371,7 +371,7 @@ def prepare_overshoots(mode="random"):
         T_lims = np.array([1.5, 2.0, 2.5])
         t_convs = np.array([0.0, 0.0, 0.0])
     elif mode == "random":
-        n_overshoots = 200
+        n_overshoots = 10
         lhc_distr = np.array(lhs(3, samples=n_overshoots))
         T_peaks = np.round(4 * lhc_distr[:, 0] + 2, 2)
         # T_lims = np.round(2*lhc_distr[:,1], 2)

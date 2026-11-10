@@ -12,7 +12,7 @@ from core.tipping_element import cusp, t_cusp
 from core.tipping_network import tipping_network
 from core.coupling import linear_coupling
 from core.evolve import evolve
-from earth_sys.earth_no_enso import earth_elements
+from earth_sys.build_earth import earth_elements
 
 
 def individual_timescales(earth_params, temp_offset=2.0):

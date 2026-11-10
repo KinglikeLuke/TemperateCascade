@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import json
 sns.set(font_scale=1.25)
-from pydoe import lhs #function name >>> lhs
+from scipy.stats import qmc #function name >>> lhs
 
 ELEMENTS = {}
 #Tipping limits, see Schellnhuber, et al., 2016:
@@ -70,26 +70,30 @@ def update_limits():
 
 def main():
     """
-Latin hypercube sampling
-"""
-    points = np.array(
-        lhs(len(ELEMENTS.keys()), samples=200))  # give dimensions and sample size, here shown for a Latin hypercube
+    Latin hypercube sampling
+    """
+    names = list(ELEMENTS.keys())
+    limits = np.array(list(ELEMENTS.values()), dtype=float)  # shape (n_dims, 2)
+    lower, upper = limits[:, 0], limits[:, 1]
 
-    # rescaling function from latin hypercube
-    def latin_function(limits, rand):
-        resc_rand = limits[0] + (limits[1] - limits[0]) * rand
-        return resc_rand
+    # Which columns are log-uniform
+    is_log = np.array([name.startswith("pf") for name in names])
 
-    # MAIN
-    array_limits = []
-    sh_file = []
-    for i in range(0, len(points)):
-        print(i)
-        array_limits.append(
-            [latin_function(value, points[i][element_ind]) for element_ind, value in enumerate(ELEMENTS.values())])
+    # Unit hypercube samples, shape (10_000, n_dims)
+    points = qmc.LatinHypercube(d=len(names)).random(10_000)
 
-    array_limits = pd.DataFrame(array_limits, columns=list(ELEMENTS.keys()))
-    array_limits = array_limits.to_csv("latin_prob.txt", index=False)
+    # Work in log10 space for log columns, linear space for the rest.
+    # The inner np.where keeps non-log bounds (which may be <= 0) out of np.log10.
+    lo = np.where(is_log, np.log10(np.where(is_log, lower, 1.0)), lower)
+    hi = np.where(is_log, np.log10(np.where(is_log, upper, 1.0)), upper)
+
+    # Scale every column at once (broadcasts across rows)
+    scaled = lo + points * (hi - lo)
+
+    # Exponentiate only the log columns
+    scaled[:, is_log] = 10 ** scaled[:, is_log]
+
+    pd.DataFrame(scaled, columns=names).to_csv("latin_prob.txt", index=False)
 
 
 # limit_filename = r"start_ensemble\limits.json"

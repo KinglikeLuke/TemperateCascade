@@ -73,8 +73,8 @@ def _linear(cols):
 
 
 def _gbm():
-    return HistGradientBoostingRegressor(max_iter=300, learning_rate=0.05, max_depth=4,
-                                         early_stopping=False, random_state=0)
+    return HistGradientBoostingRegressor(learning_rate=0.1, max_depth=10, min_samples_leaf=100,
+                                         early_stopping=True, random_state=0, l2_regularization=True)
 
 
 def _tree(cols):
@@ -181,5 +181,12 @@ if __name__ == "__main__":
     # What can this tell me?
     # Beyond the obvious (Tpeak^2 tconv is a decent surrogate for integral):
     # about half our output spread is due to temperature
-    # Dependence between temperature and tipping numbers seems to be almost wholly linear - TODO: linear-nonlinear model with nonlinear lhc fit
-    # TODO more lhc samples!
+    # Dependence between temperature and tipping numbers seems to be almost wholly linear - TODO: linear-nonlinear model with lhc trees and linear leafs
+    # TODO more lhc samples traded against fewer overshoots
+    #linear overshoot share (M1)               0.512
+    # total marginal overshoot share (M2)       0.544
+    # nonlinearity in overshoot (M2-M1)         0.032
+    # parameter-only share (M3)                 0.130
+    # overshoot added to params (M5-M3)         0.666
+    # interaction params x overshoot (M5-M4)    0.154
+    # unexplained by params+summaries (1-M5)    0.204

@@ -105,7 +105,7 @@ class timing_calibration:
                 c_min = self.calibrate_element(min_limit, min_time, 1.0)
 
                 # Calibrate for maximum time (1C over limit)
-                c_max = self.calibrate_element(max_limit, min_time, 3.0)
+                c_max = self.calibrate_element(max_limit, max_time, 3.0)
 
                 results[element] = {
                     'c_min': c_min,

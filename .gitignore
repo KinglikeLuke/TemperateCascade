@@ -216,6 +216,6 @@ __marimo__/
 .streamlit/secrets.toml
 
 results/
-earth_sys/earth_no_enso.py
+earth_sys/build_earth.py
 analysis_results/
 medium.csv

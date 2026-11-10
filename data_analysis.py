@@ -16,7 +16,7 @@ from plotly import graph_objects as go
 
 OVERSHOOT_PROPERTIES = ["T_lim", "T_peak", "t_conv"]
 FOLDER = Path(
-    r"C:\Users\lukas\Documents\PhD\Paper 1\numerical_data\results\strengths\2026-10-21_2"
+    r"C:\Users\lukas\Documents\PhD\Paper 1\numerical_data\results\strengths\2026-11-04_3"
 )
 TEMP_INPUT_PATH = Path(r"temp_input\Tpeak_tconv_values\temp_input_values.txt")
 INFLUENCE_OUTPUT_DIR = Path(

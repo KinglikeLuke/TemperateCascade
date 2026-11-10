@@ -18,7 +18,7 @@ from core.tipping_element import t_cusp, state_intervention, derivative_interven
 from core.tipping_network import tipping_network
 from earth_sys.functions_earth_system_no_enso import global_functions
 from earth_sys.timing_no_enso import individual_timescales
-from earth_sys.earth_no_enso import earth_elements
+from earth_sys.build_earth import earth_elements
 # TODO ask llm to makes this less ass
 from start_ensemble.latin_probability_distribution import update_limits
 update_limits()
